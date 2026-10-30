@@ -40,7 +40,29 @@ export function defaultConfig(): AppConfig {
     autoCompact: true,
     notifications: true,
     allowRules: {},
+    recentDirs: [],
   };
+}
+
+const MAX_RECENT = 8;
+
+/**
+ * The recent list with `dir` first, then the folder just left, then the others; the home folder and folders that no
+ * longer exist are dropped, duplicates removed, at most MAX_RECENT kept.
+ */
+export function withRecentDir(list: string[] | undefined, dir: string, previous?: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of [dir, previous ?? '', ...(list ?? [])]) {
+    if (!d || seen.has(d) || d === os.homedir()) continue;
+    seen.add(d);
+    try {
+      if (fs.statSync(d).isDirectory()) out.push(d);
+    } catch {
+      /* gone */
+    }
+  }
+  return out.slice(0, MAX_RECENT);
 }
 
 function normalizeOllamaHost(host: string): string {
@@ -76,6 +98,7 @@ export function loadConfig(): AppConfig {
       autoCompact: raw.autoCompact ?? d.autoCompact,
       notifications: raw.notifications ?? d.notifications,
       allowRules: raw.allowRules && typeof raw.allowRules === 'object' && !Array.isArray(raw.allowRules) ? raw.allowRules : {},
+      recentDirs: Array.isArray(raw.recentDirs) ? raw.recentDirs.filter((d): d is string => typeof d === 'string') : [],
       mcpServers: raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers) ? raw.mcpServers : {},
       mcpTrusted: raw.mcpTrusted && typeof raw.mcpTrusted === 'object' && !Array.isArray(raw.mcpTrusted) ? raw.mcpTrusted : {},
       ollama: { ...d.ollama, ...(raw.ollama ?? {}) },

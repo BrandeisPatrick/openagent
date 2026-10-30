@@ -7,7 +7,7 @@ import { McpManager, PROJECT_FILE } from './mcp';
 import { searchFiles } from './files';
 import { appendInstruction } from './instructions';
 import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
-import { loadConfig, normalizeConfig, saveConfig } from './config';
+import { loadConfig, normalizeConfig, saveConfig, withRecentDir } from './config';
 import { BrowserController } from './browser';
 import { Agent, PLAN_APPROVED_TEXT } from './agent';
 import { diffOf, listChanges, revertChange } from './changes';
@@ -251,13 +251,17 @@ function registerIpc(): void {
   ipcMain.handle('config:set', (_e, next: AppConfig) => {
     const before = config;
     const result = applyConfig(next);
-    if (before.workingDirectory !== config.workingDirectory) void mcp?.reload().catch((err: unknown) => console.warn('[mcp] reload failed:', err));
+    if (before.workingDirectory !== config.workingDirectory) {
+      void mcp?.reload().catch((err: unknown) => console.warn('[mcp] reload failed:', err));
+      agent?.emitContext();
+    }
     if (before.provider !== config.provider || before.ollama.model !== config.ollama.model || before.ollama.numCtx !== config.ollama.numCtx || before.portkey.model !== config.portkey.model || before.portkey.contextWindow !== config.portkey.contextWindow || before.autoCompact !== config.autoCompact) agent?.emitContext();
     return result;
   });
   const applyConfig = (next: AppConfig) => {
     // MCP servers and trust are changed through the mcp:* handlers only: a stale copy sent with the rest of the settings must not undo them.
-    const merged = { ...config, ...next, ollama: { ...config.ollama, ...next.ollama }, portkey: { ...config.portkey, ...next.portkey }, mcpServers: config.mcpServers, mcpTrusted: config.mcpTrusted, allowRules: config.allowRules };
+    const merged = { ...config, ...next, ollama: { ...config.ollama, ...next.ollama }, portkey: { ...config.portkey, ...next.portkey }, mcpServers: config.mcpServers, mcpTrusted: config.mcpTrusted, allowRules: config.allowRules, recentDirs: config.recentDirs };
+    if (merged.workingDirectory !== config.workingDirectory) merged.recentDirs = withRecentDir(config.recentDirs, merged.workingDirectory, config.workingDirectory);
     // A caller that only flipped the legacy flag still gets the matching mode.
     if (next.permissionMode === undefined && next.autoApprove !== undefined && next.autoApprove !== config.autoApprove) merged.permissionMode = next.autoApprove ? 'bypass' : 'ask';
     config = normalizeConfig(merged);
@@ -273,7 +277,7 @@ function registerIpc(): void {
     if (!win) return null;
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: config.workingDirectory });
     if (res.canceled || !res.filePaths[0]) return null;
-    config = { ...config, workingDirectory: res.filePaths[0] };
+    config = { ...config, workingDirectory: res.filePaths[0], recentDirs: withRecentDir(config.recentDirs, res.filePaths[0], config.workingDirectory) };
     saveConfig(config);
     agent?.emitContext();
     return config.workingDirectory;

@@ -154,6 +154,8 @@ export interface AppConfig {
   notifications: boolean;
   /** "Always allow … for this project" answers, by working directory (see ProjectRules) */
   allowRules: Record<string, StoredRules>;
+  /** Working directories used before, most recent first (at most 8); the welcome screen offers them */
+  recentDirs: string[];
 }
 
 /** What an approval card's "always" answer covers: the rest of this session, or this working directory from now on */

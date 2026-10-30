@@ -545,8 +545,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .cmd code { min-width: 0; }
 .cmd-prompt { flex: none; color: var(--text-400); user-select: none; }
 .out { position: relative; min-width: 0; }
+/* 746px: 40 lines of 18px (BODY_LINES in tools.ts cuts longer output) with padding, borders and a scrollbar; only wrapped lines scroll */
 .out pre {
-  margin: 0; padding: 8px 12px; max-height: 360px; overflow: auto;
+  margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
   background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
   font: 12px/18px var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
@@ -558,12 +559,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .out.note pre { color: var(--text-400); }
 .tool-note { font-size: 12px; line-height: 16px; color: var(--text-400); white-space: pre-wrap; }
 pre.args {
-  margin: 0; padding: 8px 12px; max-height: 240px; overflow: auto;
+  margin: 0; padding: 8px 12px; max-height: 746px; overflow: auto;
   background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
   font: 12px/18px var(--mono); color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .code-view {
-  display: flex; max-height: 360px; overflow: auto;
+  display: flex; max-height: 746px; overflow: auto;
   background: var(--code-bg); border: 1px solid var(--border-subtle); border-radius: var(--r-card);
   font: 12px/18px var(--mono);
 }
@@ -1483,3 +1484,51 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
   .setup-strip { animation: none; }
   .status-flash { transition: none; }
 }
+
+/* ---------- Tick 4: recent projects, paths that open in the editor, long tool output ---------- */
+
+/* Recent projects: under the setup strip, above the suggestions; a chip per folder used before */
+.recent-dirs { display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(520px, 100%); margin-top: 20px; }
+.setup-strip:not([hidden]) + .recent-dirs { margin-top: 14px; }
+.setup-strip:not([hidden]) + .recent-dirs[hidden] + .empty-suggestions { margin-top: 14px; }
+.recent-label { font-size: 12px; line-height: 16px; color: var(--text-400); }
+.recent-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 100%; }
+.recent-dir {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px;
+  height: 28px; padding: 0 10px 0 8px; border-radius: 999px;
+  border: 1px solid var(--border-subtle); background: transparent;
+  font-size: 13px; line-height: 18px; color: var(--text-200);
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.recent-dir:hover { background: var(--surface-hover); border-color: var(--border); color: var(--text-100); }
+.recent-dir:active { background: var(--pressed); }
+.recent-dir.busy { opacity: 0.6; cursor: progress; }
+.recent-icon { display: inline-flex; flex: none; color: var(--text-400); transition: color 0.12s; }
+.recent-dir:hover .recent-icon { color: var(--text-200); }
+.recent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Paths in Read / Write / Edit / List rows, their diff headers and approval cards open in the editor */
+.path-link { cursor: pointer; border-radius: 4px; }
+.tool-arg.path-link:hover, .path-link:hover .path-dir, .path-link:hover .path-base { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.tool-arg.path-link:hover { color: var(--text-100); }
+.path-link:focus-visible { outline-offset: 1px; }
+
+/* Long tool output: the first 40 lines, then a bar that shows the rest (tools.ts withMore); no inner cap after that */
+.out-cut { display: flex; flex-direction: column; min-width: 0; }
+.out-cut > .out > pre, .out-cut > .code-view, .out-cut > .cmd, .out-cut > pre.args, .out-cut > .diff { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.out-more {
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
+  background: var(--code-bg); border: 1px solid var(--border-subtle); border-top: none;
+  border-radius: 0 0 var(--r-card) var(--r-card);
+  font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-400);
+  transition: background-color 0.12s, color 0.12s;
+}
+.out-more:hover { background: var(--code-hover); color: var(--text-100); }
+.out-more:active { background: var(--pressed); }
+.out-more:focus-visible { outline-offset: -2px; }
+.out-cut > .diff + .out-more { background: var(--diff-bg); }
+.out-cut > .diff + .out-more:hover { background: var(--code-hover); }
+.out-cut > .out.error + .out-more { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.out-cut > .out.error + .out-more:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.tool-body .diff-body { max-height: 746px; }
+.out.expanded > pre, .code-view.expanded, pre.args.expanded, .tool-body .diff.expanded .diff-body { max-height: none; }

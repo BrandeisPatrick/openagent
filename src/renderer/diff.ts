@@ -97,6 +97,8 @@ export interface DiffOptions {
   limit?: number;
   /** Extra class on the component, e.g. "fill" to fill a pane instead of capping the height */
   className?: string;
+  /** The header's +/− counts when `rows` is only the start of the diff (a cut tool row) */
+  stat?: { added: number; removed: number };
 }
 
 const SIGN: Record<DiffKind, string> = { add: '+', del: '−', ctx: '' };
@@ -114,7 +116,7 @@ function gapHtml(index: number, hidden: number, label: string, numbered: boolean
 }
 
 export function renderDiff(path: string, rows: DiffRow[], opts: DiffOptions = {}): HTMLElement {
-  const { added, removed } = diffStats(rows);
+  const { added, removed } = opts.stat ?? diffStats(rows);
   const numbered = rows.some((r) => r.no !== undefined);
   const lang = langFromPath(path);
   const el = document.createElement('div');

@@ -22,8 +22,8 @@ MCP servers · context meter, auto-compaction and `/compact` · project instruct
 | 6 | **Message actions on hover**: copy a user message, re-send an edited one | Small, constant friction | done (tick 2) |
 | 7 | **`#` memory shortcut**: a message starting with `#` appends to the project's instructions file after confirmation | Claude Code's quick way to teach the project | done (tick 3) |
 | 8 | **Keyboard polish**: Esc Esc for rewind, ⌘↑/⌘↓ history in the composer, ⌘⇧C copy last reply | Power-user parity | done (tick 3) |
-| 9 | **Welcome and empty states**: recent sessions and project hints on the empty screen, first-run checklist (Ollama running, model pulled, folder chosen) | First five minutes | done (tick 3) |
-| 10 | **Transcript details**: collapse long tool output by default with "show more", sticky date dividers, unread marker when returning to a session | Reading long sessions | later |
+| 9 | **Welcome and empty states**: recent sessions and project hints on the empty screen, first-run checklist (Ollama running, model pulled, folder chosen) | First five minutes | done (ticks 3–4) |
+| 10 | **Transcript details**: collapse long tool output by default with "show more", sticky date dividers, unread marker when returning to a session | Reading long sessions | done (tick 4) |
 | 11 | **Diff pane review**: accept/revert per hunk, "open in editor" per line | Reviewing larger changes | later |
 | 12 | **Subagents / background tasks** with a Tasks pane | Parallel work; heavy for small local models | later |
 
@@ -37,6 +37,15 @@ Contract: `OpenCoderApi.instructions.append(text)` → `{ path, label }` (main a
 - **Keyboard**: `Esc` twice within 600 ms while no run is going opens the rewind confirm for the latest user message that has a `turn` (nothing happens when there is none); the single `Esc` keeps its meaning (stop a run, close menus). `⌘↑` / `⌘↓` in the composer when the caret is on the first/last line (or the composer is empty) walk through the session's previous user messages (newest first), restoring the draft when walking past the end; the history comes from the rendered user bubbles. `⌘⇧C` copies the last assistant reply's Markdown source (the same text the Copy button copies) and flashes a short "Copied" tooltip on the status area. Add the three to the shortcuts sheet.
 - **Welcome and empty states**: the empty state gains a compact setup strip (`#setup-strip`) above the suggestion chips, shown only when something is missing: Ollama unreachable (reuse the connection check), the configured model not in `listOllamaModels()`, or the working directory still the home folder. Each line has a short action ("Start Ollama", "Pull a model" → shows the `ollama pull qwen3:8b` command with a Copy button, "Choose folder" → the existing cwd picker). It disappears once all three are fine; it is never shown for the Portkey provider except the folder line.
 - **Debug hooks**: `__oc_debug.setup({ ollama: boolean, model: boolean, folder: boolean })` renders the strip directly; `null` restores the real checks.
+
+## Tick 4 renderer spec (item 10 and the rest of item 9)
+
+Contract: `AppConfig.recentDirs` (most recent first, at most 8; main maintains it when the working directory changes, and `readSettings()` must pass it through unchanged like `allowRules`).
+
+- **Recent projects on the welcome screen**: under the setup strip and above the suggestion chips, a "Recent projects" row (`#recent-dirs`) with one chip per entry of `config.recentDirs` other than the current working directory (folder name, full path as tooltip, folder icon). Clicking a chip switches the working directory the way the title-bar picker does (`oc.setConfig` with the new `workingDirectory`, then the same UI refresh), without a notice in an empty session. Hidden when there is nothing to show.
+- **Click-to-open paths**: in Read / Write / Edit / List tool rows, the path becomes a link-like control (hover underline, pointer; title "Open in editor") that calls `oc.changes.openInEditor(absolutePath)`; the absolute path is the row's `title` or is resolved against the working directory. Approval cards' paths too.
+- **Long outputs**: a tool row body longer than 40 lines shows the first 40 with a "Show N more lines" control at the bottom (`.out-more`), which expands it; collapsing again is not needed. Assistant replies are never cut.
+- **Debug hooks**: `__oc_debug.recent(dirs | null)` renders the row directly.
 
 ## How changes are verified
 

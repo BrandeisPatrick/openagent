@@ -370,6 +370,58 @@ export function stripCwd(text: string): string {
   return t;
 }
 
+// ---------- Paths that open in the editor ----------
+
+/** /Users/me (or /home/me) when the working directory is inside it: what "~" stands for in a tool's path */
+function homeOf(dir: string): string {
+  return /^\/(?:Users|home)\/[^/]+/.exec(dir)?.[0] ?? '';
+}
+
+/**
+ * A tool's path argument as an absolute path, resolved the way the main process does it: "~" is the home folder,
+ * relative paths start at the working directory, "." and ".." are folded. '' when that cannot be told here (no
+ * working directory yet, or "~" while the working directory is outside the home folder).
+ */
+export function absolutePath(p: string, base = cwd): string {
+  let s = String(p ?? '').trim();
+  if (!s) return '';
+  if (s === '~' || s.startsWith('~/')) {
+    const home = homeOf(base);
+    if (!home) return '';
+    s = home + s.slice(1);
+  } else if (!s.startsWith('/')) {
+    if (!base) return '';
+    s = `${base}/${s}`;
+  }
+  const out: string[] = [];
+  for (const part of s.split('/')) {
+    if (part === '..') out.pop();
+    else if (part && part !== '.') out.push(part);
+  }
+  return '/' + out.join('/');
+}
+
+/** Rows whose argument is a file or folder: the path in the row opens it */
+const PATH_TOOLS = new Set(['read_file', 'write_file', 'edit_file', 'list_directory']);
+
+/**
+ * Makes a path shown in a tool row or an approval card a link-like button (.path-link) that opens it with the
+ * system's editor; renderer.ts handles the click. `el` is replaced by a <button> with its classes and content, or
+ * stays as it is when the path cannot be resolved. Returns the element that is in the DOM now.
+ */
+export function linkPath(el: HTMLElement | null, rawPath: string): HTMLElement | null {
+  const abs = absolutePath(rawPath);
+  if (!el || !el.parentNode || !abs) return el;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `${el.className} path-link`;
+  btn.title = 'Open in editor';
+  btn.dataset.path = abs;
+  btn.append(...el.childNodes);
+  el.replaceWith(btn);
+  return btn;
+}
+
 function fileKey(p: string): string {
   let k = p.trim().replace(/^\.\//, '');
   if (cwd && k.startsWith(cwd + '/')) k = k.slice(cwd.length + 1);
@@ -417,33 +469,123 @@ export interface ToolCard {
   interrupt(): void;
 }
 
+/** Lines of a file's content, without the empty "line" after a trailing newline. */
+export function fileLines(content: string): string[] {
+  return content.replace(/\n$/, '').split('\n');
+}
+
+// Long bodies: a block (output, file view, diff, command, arguments) of more than BODY_LINES lines shows the first
+// BODY_LINES and a "Show N more lines" bar under them (.out-more). The bar shows the rest; there is no "show less"
+// (the row itself folds). Assistant replies are never cut.
+
+/** How many lines of a tool row's block show before the "Show N more lines" bar */
+export const BODY_LINES = 40;
+
+/**
+ * `block` shows the first BODY_LINES lines of something `hidden` lines longer: it goes into a wrapper (.out-cut) with
+ * the bar under it. Clicking the bar calls `expand`, which shows the rest in `block` or returns a whole new block, and
+ * the block takes the wrapper's place.
+ */
+function withMore(block: HTMLElement, hidden: number, expand: () => HTMLElement | void): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'out-cut';
+  const bar = document.createElement('button');
+  bar.type = 'button';
+  bar.className = 'out-more';
+  bar.innerHTML = `${icon('chevron-down', 14)}<span>Show ${hidden} more line${hidden === 1 ? '' : 's'}</span>`;
+  bar.addEventListener('click', () => {
+    const focused = document.activeElement === bar;
+    const full = expand() ?? block;
+    full.classList.add('expanded');
+    wrap.replaceWith(full);
+    // The bar is gone: keyboard focus goes back to the row it belongs to
+    if (focused) full.closest('details')?.querySelector<HTMLElement>(':scope > summary')?.focus({ preventScroll: true });
+  });
+  wrap.append(block, bar);
+  return wrap;
+}
+
 function outBlock(text: string, cls = ''): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'out' + (cls ? ` ${cls}` : '');
   wrap.innerHTML = `<button type="button" class="out-copy icon-btn sm" aria-label="Copy output" data-tip="Copy">${icon('copy', 14)}</button>`;
   const pre = document.createElement('pre');
-  pre.textContent = text;
   wrap.appendChild(pre);
-  return wrap;
+  const lines = fileLines(text);
+  if (lines.length <= BODY_LINES) {
+    pre.textContent = text;
+    return wrap;
+  }
+  // The rest is in the block but not shown, so Copy (the pre's text) still copies the whole output.
+  const head = lines.slice(0, BODY_LINES).join('\n');
+  pre.textContent = head;
+  const rest = document.createElement('span');
+  rest.className = 'out-rest';
+  rest.hidden = true;
+  rest.textContent = text.slice(head.length);
+  pre.appendChild(rest);
+  return withMore(wrap, lines.length - BODY_LINES, () => {
+    rest.hidden = false;
+  });
 }
 
-function codeView(numbers: string[], code: string, lang: string | null): HTMLElement {
+/** A file view (line numbers, highlighted code); only the lines on screen are highlighted. */
+function codeView(numbers: string[], code: string, lang: string | null, cls = ''): HTMLElement {
   const el = document.createElement('div');
-  el.className = 'code-view';
-  el.innerHTML = `<pre class="gutter">${numbers.join('\n')}</pre><pre class="code"><code>${highlight(code, lang)}</code></pre>`;
-  return el;
+  el.className = 'code-view' + (cls ? ` ${cls}` : '');
+  const fill = (nums: string[], text: string) => {
+    el.innerHTML = `<pre class="gutter">${nums.join('\n')}</pre><pre class="code"><code>${highlight(text, lang)}</code></pre>`;
+  };
+  const lines = fileLines(code);
+  if (lines.length <= BODY_LINES) {
+    fill(numbers, code);
+    return el;
+  }
+  fill(numbers.slice(0, BODY_LINES), lines.slice(0, BODY_LINES).join('\n'));
+  return withMore(el, lines.length - BODY_LINES, () => fill(numbers, code));
 }
 
 function argsBlock(a: Args, raw: unknown): HTMLElement {
   const pre = document.createElement('pre');
   pre.className = 'args';
-  pre.innerHTML = highlight(typeof raw === 'string' ? raw : JSON.stringify(a, null, 2), 'json');
-  return pre;
+  const text = typeof raw === 'string' ? raw : JSON.stringify(a, null, 2);
+  const lines = fileLines(text);
+  if (lines.length <= BODY_LINES) {
+    pre.innerHTML = highlight(text, 'json');
+    return pre;
+  }
+  pre.innerHTML = highlight(lines.slice(0, BODY_LINES).join('\n'), 'json');
+  return withMore(pre, lines.length - BODY_LINES, () => {
+    pre.innerHTML = highlight(text, 'json');
+  });
 }
 
-/** Lines of a file's content, without the empty "line" after a trailing newline. */
-export function fileLines(content: string): string[] {
-  return content.replace(/\n$/, '').split('\n');
+/** A command (bash, terminal_run) after its "$" */
+function cmdBlock(command: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'cmd';
+  const fill = (text: string) => {
+    el.innerHTML = `<span class="cmd-prompt">$</span><code>${highlight(text, 'sh')}</code>`;
+  };
+  const lines = fileLines(command);
+  if (lines.length <= BODY_LINES) {
+    fill(command);
+    return el;
+  }
+  fill(lines.slice(0, BODY_LINES).join('\n'));
+  return withMore(el, lines.length - BODY_LINES, () => fill(command));
+}
+
+/** The diff of a write or edit row: its header's path opens the file; only the rows on screen are rendered. */
+function rowDiff(path: string, rows: DiffRow[]): HTMLElement {
+  const stat = diffStats(rows);
+  const make = (shown: DiffRow[]) => {
+    const el = renderDiff(displayPath(path) || 'file', shown, { stat });
+    linkPath(el.querySelector<HTMLElement>('.diff-head .path'), path);
+    return el;
+  };
+  if (rows.length <= BODY_LINES) return make(rows);
+  return withMore(make(rows.slice(0, BODY_LINES)), rows.length - BODY_LINES, () => make(rows));
 }
 
 const clip = (s: string, n = 20_000): string => (s.length > n ? s.slice(0, n) + '\n…' : s);
@@ -655,6 +797,8 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
     (label.server ? `<span class="tool-server" title="${escapeHtml(`MCP server: ${label.server}`)}">${escapeHtml(label.server)}</span>` : '') +
     `<span class="tool-meta"></span>`;
   if (label.arg || label.title) summary.querySelector('.tool-arg')!.setAttribute('title', label.title || label.arg);
+  // Read / Write / Edit / List: the path opens in the editor (its tooltip says so instead of repeating the path)
+  if (PATH_TOOLS.has(name)) linkPath(summary.querySelector<HTMLElement>('.tool-arg'), label.title ?? '');
   const body = document.createElement('div');
   body.className = 'tool-body';
   el.append(summary, body);
@@ -666,20 +810,16 @@ export function createToolCard(name: string, rawArgs: unknown): ToolCard {
     editRows = lineDiff(a.old_string, a.new_string);
     const at = startLine(path, a.old_string);
     if (at !== undefined) editRows = numberRows(editRows, at);
-    body.appendChild(renderDiff(displayPath(path) || 'file', editRows));
+    body.appendChild(rowDiff(path, editRows));
     const st = diffStats(editRows);
     summary.querySelector('.tool-meta')!.innerHTML = statHtml(st.added, st.removed);
   } else if (name === 'write_file' && typeof a.content === 'string') {
     const rows = numberRows(fileLines(a.content).map((t) => ({ kind: 'add' as const, text: t })), 1);
-    body.appendChild(renderDiff(displayPath(path) || 'file', rows));
+    body.appendChild(rowDiff(path, rows));
   } else if ((name === 'bash' || name === 'terminal_run') && str(a, 'command')) {
-    const cmd = document.createElement('div');
-    cmd.className = 'cmd';
-    cmd.innerHTML = `<span class="cmd-prompt">$</span><code>${highlight(str(a, 'command'), 'sh')}</code>`;
-    body.appendChild(cmd);
+    body.appendChild(cmdBlock(str(a, 'command')));
   } else if (name === 'browser_eval' && str(a, 'code')) {
-    body.appendChild(codeView([], str(a, 'code'), 'js'));
-    body.lastElementChild!.classList.add('no-gutter');
+    body.appendChild(codeView([], str(a, 'code'), 'js', 'no-gutter'));
   } else if (name === 'browser_type' && str(a, 'text').length > 80) {
     body.appendChild(outBlock(str(a, 'text'), 'note'));
   } else if (name === 'update_tasks' && Array.isArray(a.tasks)) {

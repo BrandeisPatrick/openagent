@@ -33,7 +33,7 @@ import { basename, copyWithFeedback, escapeHtml, formatCount, isTextField, write
 import { renderMarkdown } from './markdown.js';
 import { lineDiff, numberRows, parseEditPreview, renderDiff, setDiffBaseDir } from './diff.js';
 import { highlight } from './highlight.js';
-import { approvalTitle, asArgs, createToolCard, displayPath, editStartLine, fileLines, forgetFile, groupSummary, mcpParts, resetFileCache, setToolCwd, statusVerb, type ToolCard } from './tools.js';
+import { approvalTitle, asArgs, createToolCard, displayPath, editStartLine, fileLines, forgetFile, groupSummary, linkPath, mcpParts, resetFileCache, setToolCwd, statusVerb, type ToolCard } from './tools.js';
 import { closeMenu, initTooltips, isMenuOpen, menuAnchoredTo, openMenu, type MenuItem, type MenuSection } from './popover.js';
 import { MODE_CHIP_CLASSES, MODE_CYCLE, MODES, modeOf, nextMode } from './modes.js';
 import { createPlanCard, type PlanCard, type PlanDecision } from './plan.js';
@@ -48,6 +48,7 @@ import { appendWithMentions, createMentionPicker, normalizeMention } from './men
 import { createRulesPanel, mockRulesSource } from './rules.js';
 import { cleanTasks, createTaskList } from './tasks.js';
 import { createComposerHistory, createDoublePress, createInstructionFiles, memoryText, oneLine } from './composer.js';
+import { createRecentRow, dirName, recentChoices } from './recent.js';
 import {
   cleanChecks,
   createSetupStrip,
@@ -112,6 +113,11 @@ declare global {
        * instead of the real ones, which stop re-checking meanwhile; null goes back to the real checks
        */
       setup(checks: Partial<SetupChecks> | null): void;
+      /**
+       * Renders the welcome screen's Recent projects row from these folders instead of config.recentDirs (the current
+       * working directory is still left out; clicking a chip really switches to it); null goes back to config.recentDirs
+       */
+      recent(dirs: string[] | null): void;
     };
   }
 }
@@ -524,8 +530,26 @@ function endAssistant(): void {
   currentAssistant = null;
 }
 
+/** A path in a tool row or an approval card (.path-link): opens it with the system's editor, as the Diff pane does. */
+async function openPath(path: string, anchor: HTMLElement): Promise<void> {
+  if (!path) return;
+  try {
+    if (typeof oc.changes?.openInEditor !== 'function') throw new Error('No handler registered');
+    await oc.changes.openInEditor(path);
+  } catch (err) {
+    showInlineError(anchor, `Couldn't open ${basename(path) || path}: ${cleanError(err)}`);
+  }
+}
+
 messagesEl.addEventListener('click', (e) => {
   const t = e.target as HTMLElement;
+  const pathLink = t.closest<HTMLElement>('.path-link');
+  if (pathLink) {
+    // In a row's summary the click opens the file, not the row
+    e.preventDefault();
+    void openPath(pathLink.dataset.path ?? '', pathLink);
+    return;
+  }
   const codeCopy = t.closest<HTMLElement>('.code-copy');
   if (codeCopy) {
     const code = codeCopy.closest('.code-block')?.querySelector('code');
@@ -716,11 +740,17 @@ function addApprovalCard(ev: Extract<AgentEvent, { type: 'approval_request' }>, 
     let rows = lineDiff(p.oldText, p.newText);
     const at = editStartLine(p.path, p.oldText);
     if (at !== undefined) rows = numberRows(rows, at);
-    body.appendChild(renderDiff(displayPath(p.path), rows));
+    const diff = renderDiff(displayPath(p.path), rows);
+    // The file's path opens it in the editor, as in the tool rows
+    linkPath(diff.querySelector<HTMLElement>('.diff-head .path'), p.path);
+    body.appendChild(diff);
   } else if (ev.name === 'write_file' && card && typeof card.args.content === 'string') {
     const path = typeof card.args.path === 'string' ? card.args.path : ev.detail.split('\n')[0];
     subject = basename(path);
-    body.appendChild(renderDiff(displayPath(ev.detail.split('\n')[0] || path), numberRows(fileLines(card.args.content).map((t) => ({ kind: 'add' as const, text: t })), 1)));
+    const file = ev.detail.split('\n')[0] || path;
+    const diff = renderDiff(displayPath(file), numberRows(fileLines(card.args.content).map((t) => ({ kind: 'add' as const, text: t })), 1));
+    linkPath(diff.querySelector<HTMLElement>('.diff-head .path'), file);
+    body.appendChild(diff);
   } else {
     if (ev.name === 'write_file') subject = basename(ev.detail.split('\n')[0]);
     const pre = document.createElement('pre');
@@ -2209,6 +2239,7 @@ function applyConfigToUi(): void {
   cwdBtn.dataset.tip = `${config.workingDirectory} · click to change`;
   setToolCwd(config.workingDirectory);
   setDiffBaseDir(config.workingDirectory);
+  renderRecent();
   document.documentElement.dataset.theme = config.theme === 'system' ? '' : config.theme;
   const connKey = `${config.provider}|${config.ollama.baseURL}|${config.ollama.model}`;
   if (connKey !== lastConnKey) {
@@ -2409,9 +2440,15 @@ async function startOllama(button: HTMLButtonElement): Promise<void> {
 }
 
 /**
- * The working-directory picker (the top bar's folder and the setup strip's "Choose folder"). In an empty session
- * the top bar and the strip show the change; a notice would replace the welcome screen.
+ * After the working directory changed (the picker, a recent project): the top bar, the setup strip and the recent
+ * row follow. In an empty session they show the change; a notice would replace the welcome screen.
  */
+function folderChanged(dir: string): void {
+  applyConfigToUi();
+  if (emptyState.hidden) addSystemMessage(`Working directory set to ${dir}`, 'notice');
+}
+
+/** The working-directory picker (the top bar's folder and the setup strip's "Choose folder"). */
 async function chooseFolder(): Promise<boolean> {
   let dir: string | null;
   try {
@@ -2422,11 +2459,57 @@ async function chooseFolder(): Promise<boolean> {
   }
   if (!dir) return false;
   config = await oc.getConfig();
-  applyConfigToUi();
-  if (emptyState.hidden) addSystemMessage(`Working directory set to ${dir}`, 'notice');
+  folderChanged(dir);
   return true;
 }
 cwdBtn.onclick = () => void chooseFolder();
+
+// ---------- Recent projects: the welcome screen's row of folders used before (AppConfig.recentDirs) ----------
+
+/** The debug hook's folders, shown instead of config.recentDirs */
+let debugRecent: string[] | null = null;
+
+const recentRow = createRecentRow({ root: $('recent-dirs'), onPick: (dir, chip) => switchFolder(dir, chip) });
+
+/** The row: config.recentDirs (or the debug hook's folders) without the current working directory; hidden when empty. */
+function renderRecent(): void {
+  if (!config) return;
+  recentRow.render(recentChoices(debugRecent ?? config.recentDirs, config.workingDirectory));
+}
+
+/**
+ * A recent project's chip: the working directory switches to it the way the picker does (setConfig, then the same
+ * refresh; no notice in an empty session). The main process puts the folder it switched to first in recentDirs and
+ * drops folders that no longer exist, so when it is not first the folder is gone: the previous one comes back.
+ */
+async function switchFolder(dir: string, chip: HTMLButtonElement): Promise<void> {
+  const prev = config.workingDirectory;
+  if (dir === prev) return;
+  let next: AppConfig;
+  try {
+    next = await oc.setConfig({ ...config, workingDirectory: dir });
+  } catch (err) {
+    showInlineError(chip, `Couldn't switch to ${dirName(dir)}: ${cleanError(err)}`);
+    return;
+  }
+  if (Array.isArray(next?.recentDirs) && next.recentDirs[0] !== dir) {
+    showInlineError(chip, `Can't find ${shortPath(dir)}. It may have been moved or deleted.`);
+    try {
+      next = await oc.setConfig({ ...next, workingDirectory: prev });
+    } catch {
+      /* the top bar shows where the agent works now */
+    }
+    config = next;
+    applyConfigToUi();
+    return;
+  }
+  config = next;
+  folderChanged(dir);
+  // The picker's change reaches the context meter through a context event; this one asks
+  void refreshContext();
+  // The chip is gone (it is the working directory now): on to the first message, as after "Choose folder"
+  if (!dialogOpen()) inputEl.focus();
+}
 
 /** Keeps the native browser view glued to its slot while something animates the layout. */
 function trackBounds(ms: number): void {
@@ -3264,7 +3347,7 @@ $('show-other-provider').onclick = () => {
   toggleProviderFields();
 };
 
-/** The form's values over the loaded config (mcpServers, mcpTrusted and allowRules belong to the main process and pass through as loaded). */
+/** The form's values over the loaded config (mcpServers, mcpTrusted, allowRules and recentDirs belong to the main process and pass through as loaded). */
 function readSettings(): AppConfig {
   return {
     ...config,
@@ -3382,8 +3465,8 @@ function mcpSource(): McpApi | null {
 }
 
 /**
- * mcpServers, mcpTrusted and allowRules are managed by the main process: keep this window's copy current so saving
- * Settings (or any other setConfig) passes them through unchanged.
+ * mcpServers, mcpTrusted, allowRules and recentDirs are managed by the main process: keep this window's copy current
+ * so saving Settings (or any other setConfig) passes them through unchanged.
  */
 async function syncOwnedConfig(): Promise<void> {
   try {
@@ -3394,6 +3477,7 @@ async function syncOwnedConfig(): Promise<void> {
         mcpServers: latest.mcpServers ?? config.mcpServers,
         mcpTrusted: latest.mcpTrusted ?? config.mcpTrusted,
         allowRules: latest.allowRules ?? config.allowRules,
+        recentDirs: latest.recentDirs ?? config.recentDirs,
       };
     }
   } catch {
@@ -3613,6 +3697,10 @@ window.__oc_debug = {
     syncConnection();
     // Back to the real checks: ask Ollama again now
     if (!debugSetup && config) void checkConnection();
+  },
+  recent(dirs: string[] | null) {
+    debugRecent = Array.isArray(dirs) ? dirs.slice() : null;
+    renderRecent();
   },
 };
 
