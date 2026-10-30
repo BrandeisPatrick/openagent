@@ -25,7 +25,9 @@ git clone https://github.com/BrandeisPatrick/openagent.git && cd openagent
 npm install && npm start
 ```
 
-Or download `OpenAgent.app` from [Releases](https://github.com/BrandeisPatrick/openagent/releases) (not notarized: right-click → Open the first time). Portkey: Settings → Provider → Portkey, add your key and a model id.
+Or download `OpenAgent.app` from [Releases](https://github.com/BrandeisPatrick/openagent/releases) (not notarized: right-click → Open the first time).
+
+Hosted models: Settings → Provider → Portkey. For Portkey, add your Portkey key and a model id. For Anthropic directly, set the base URL to `https://api.anthropic.com/v1`, your Anthropic key, and a model such as `claude-haiku-5-5` or `claude-sonnet-5-5`. Any OpenAI-compatible endpoint works the same way.
 
 ## Features
 

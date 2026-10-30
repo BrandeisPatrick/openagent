@@ -32,6 +32,11 @@ Slash commands: `/name` runs a skill, `/skills`, `/compact [focus]`, `/mcp`. A m
 | `submit_plan` | Plan mode: hand the plan to you |
 | `mcp__<server>__<tool>` | MCP server tools |
 
+## Providers
+
+- **Ollama** (default): native `/api/chat` with `num_ctx`, thinking control and capability detection.
+- **Portkey fields** = any OpenAI-compatible endpoint. Tested: Portkey, and Anthropic directly at `https://api.anthropic.com/v1` with an Anthropic key (`claude-haiku-5-5`, `claude-sonnet-5-5`). Also usable: OpenRouter, LM Studio, vLLM, llama.cpp.
+
 ## Configuration
 
 `~/Library/Application Support/OpenAgent/config.json`: provider, model, Ollama context size (`numCtx`, 16k default), permission mode, MCP servers, rules, notifications, auto-compact. Sessions and artifacts live next to it. A project's `.mcp.json` is read; its servers stay off until enabled in Settings. Skills: `<project>/.openagent/skills`, `~/.openagent/skills`, bundled `skills/`.
