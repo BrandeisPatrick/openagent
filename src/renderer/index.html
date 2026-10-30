@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>OpenAgent</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="shell">
+    <button id="sidebar-toggle" class="icon-btn sidebar-toggle" aria-label="Toggle sidebar" data-tip="Toggle sidebar" data-tip-kbd="⌘ B" data-icon="panel-left"></button>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top drag"></div>
+      <div class="sidebar-actions">
+        <button id="new-session-btn" class="new-session" data-tip="New session" data-tip-kbd="⌘ N"><span class="new-session-icon" data-icon="plus"></span><span>New session</span></button>
+        <label class="search-field">
+          <span class="search-icon" data-icon="search"></span>
+          <input id="session-search" placeholder="Search sessions" spellcheck="false" autocomplete="off">
+        </label>
+      </div>
+      <nav id="session-list" class="session-list" aria-label="Sessions"></nav>
+      <div class="sidebar-foot">
+        <button id="settings-btn" class="foot-row"><span data-icon="settings"></span><span class="foot-label">Settings</span><kbd>⌘,</kbd></button>
+        <button id="shortcuts-btn" class="icon-btn" aria-label="Keyboard shortcuts" data-tip="Keyboard shortcuts" data-tip-kbd="⌘ /" data-icon="keyboard"></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar drag">
+        <div class="title-block">
+          <div class="session-title" id="session-title" tabindex="0" role="textbox" aria-label="Session title" data-tip="Rename" data-tip-kbd="F2" spellcheck="false">New session</div>
+          <button id="cwd-btn" class="cwd-btn" data-tip="Change working directory"><span data-icon="folder" data-icon-size="12"></span><span id="cwd-label">~</span></button>
+        </div>
+        <span class="spacer"></span>
+        <div class="topbar-actions">
+          <button id="browser-toggle" class="toggle-btn active" aria-pressed="true" data-tip="Toggle browser" data-tip-kbd="⌘ ⇧ B"><span data-icon="globe"></span><span>Browser</span></button>
+          <button id="diff-toggle" class="toggle-btn" aria-pressed="false" data-tip="Toggle diff" data-tip-kbd="⌘ ⇧ D"><span data-icon="file-diff"></span><span>Diff</span><span id="diff-count" class="count-badge" hidden>0</span></button>
+          <button id="terminal-toggle" class="toggle-btn" aria-pressed="false" data-tip="Toggle terminal" data-tip-kbd="⌘ ⇧ T"><span data-icon="terminal"></span><span>Terminal</span><span id="terminal-busy" class="busy-dot" hidden></span></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="transcript-wrap">
+          <div id="messages" class="transcript">
+            <div class="empty" id="empty-state">
+              <div class="empty-mark" id="empty-mark"></div>
+              <h1 class="empty-title">What should we build?</h1>
+              <p class="empty-text">OpenAgent reads and edits code, runs commands and browses the web. Side effects ask first unless you change the mode. Type <kbd>@</kbd> to mention a file, <kbd>/</kbd> for skills.</p>
+              <div class="empty-suggestions" id="empty-suggestions"></div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <button type="button" id="jump-latest" class="jump-latest" hidden><span data-icon="arrow-down" data-icon-size="14"></span><span>Jump to latest</span></button>
+            <div id="task-list" class="task-list" role="region" aria-label="Task list" hidden></div>
+            <div id="queue" class="queue" role="list" aria-label="Queued messages" hidden></div>
+            <div id="conn-banner" class="conn-banner" role="status" hidden>
+              <span data-icon="circle-alert" aria-hidden="true"></span>
+              <span id="conn-text" class="conn-text"></span>
+              <span class="spacer"></span>
+              <button type="button" id="conn-retry" class="btn sm">Retry</button>
+              <button type="button" id="conn-settings" class="btn sm ghost">Settings</button>
+            </div>
+            <div id="status-line" class="status-line" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="status-icon" class="status-icon" data-icon="clipboard" data-icon-size="14" aria-hidden="true"></span>
+              <span id="status-text" class="status-text">Working…</span>
+              <span id="status-time" class="status-time"></span>
+              <span class="spacer"></span>
+              <span id="status-tokens" class="status-tokens" hidden></span>
+              <button id="stop-btn" class="stop-hint" data-tip="Stop the run"><kbd>esc</kbd><span>to interrupt</span></button>
+              <span id="status-hint" class="status-hint"><kbd>↵</kbd><span>build</span><kbd>esc</kbd><span>keep planning</span></span>
+            </div>
+            <div id="slash-menu" class="slash-menu" role="listbox" hidden></div>
+            <div id="mention-menu" class="slash-menu mention-menu" role="listbox" aria-label="Files" hidden></div>
+            <div class="composer" id="composer">
+              <div id="attachments" class="attachments" role="group" aria-label="Attached images" hidden></div>
+              <div id="attach-note" class="attach-note" role="status" hidden></div>
+              <textarea id="input" rows="1" placeholder="Describe a task, / for skills, ⇧Tab to change mode" spellcheck="true" aria-label="Message"></textarea>
+              <div class="composer-bar">
+                <button type="button" id="attach-btn" class="icon-btn" aria-label="Attach image" data-tip="Attach image" data-icon="paperclip"></button>
+                <input type="file" id="attach-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden tabindex="-1" aria-hidden="true">
+                <button id="mode-btn" class="chip" aria-haspopup="menu" data-tip="Permission mode" data-tip-kbd="⇧ Tab">Ask before actions</button>
+                <button id="model-btn" class="chip" aria-haspopup="menu" data-tip="Model">…</button>
+                <button type="button" id="context-meter" class="context-meter" aria-haspopup="menu" data-tip="Context" hidden></button>
+                <span class="spacer"></span>
+                <button id="send-btn" class="send" aria-label="Send" data-tip="Send" data-tip-kbd="↵" disabled></button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="pane-resizer" id="pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize side pane" tabindex="-1"></div>
+
+        <section class="side-pane" id="side-pane" aria-label="Side pane">
+          <div class="pane-tabs" role="tablist" aria-label="Side pane">
+            <button id="pane-tab-browser" class="pane-tab active" role="tab" aria-selected="true" aria-controls="browser-pane"><span data-icon="globe" data-icon-size="14"></span><span>Browser</span></button>
+            <button id="pane-tab-diff" class="pane-tab" role="tab" aria-selected="false" aria-controls="diff-pane"><span data-icon="file-diff" data-icon-size="14"></span><span>Diff</span><span id="pane-diff-count" class="count-badge" hidden>0</span></button>
+            <button id="pane-tab-terminal" class="pane-tab" role="tab" aria-selected="false" aria-controls="terminal-pane"><span data-icon="terminal" data-icon-size="14"></span><span>Terminal</span><span id="pane-terminal-busy" class="busy-dot" hidden></span></button>
+            <span class="spacer"></span>
+            <button id="pane-close" class="icon-btn sm" aria-label="Close pane" data-tip="Close pane" data-icon="x"></button>
+          </div>
+
+          <section class="browser" id="browser-pane" role="tabpanel" aria-labelledby="pane-tab-browser">
+            <div class="browser-bar">
+              <button id="back-btn" class="icon-btn" aria-label="Back" data-tip="Back" data-icon="arrow-left"></button>
+              <button id="fwd-btn" class="icon-btn" aria-label="Forward" data-tip="Forward" data-icon="arrow-right"></button>
+              <button id="reload-btn" class="icon-btn" aria-label="Reload" data-tip="Reload" data-icon="refresh"></button>
+              <div class="url-pill">
+                <span class="url-icon" data-icon="globe" data-icon-size="14"></span>
+                <input id="url" class="url" spellcheck="false" autocomplete="off" placeholder="Enter a URL or search" aria-label="Address">
+                <span id="browser-title" class="browser-title"></span>
+              </div>
+              <span id="browsing-pill" class="browsing-pill" role="status" hidden><span class="pulse" aria-hidden="true"></span><span>Agent is browsing</span></span>
+              <button id="open-external-btn" class="icon-btn" aria-label="Open in browser" data-tip="Open in browser" data-icon="external-link"></button>
+              <div class="browser-progress" id="browser-progress"></div>
+            </div>
+            <div id="browser-view" class="browser-view">
+              <div class="browser-placeholder">
+                <span class="placeholder-icon" data-icon="globe" data-icon-size="20"></span>
+                <span>The built-in browser renders here. Ask the agent to open a page, or type a URL above.</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="changes" id="diff-pane" role="tabpanel" aria-labelledby="pane-tab-diff" hidden>
+            <div id="change-list" class="change-list" role="listbox" aria-label="Changed files" hidden></div>
+            <div id="change-detail" class="change-detail" hidden></div>
+            <div id="changes-empty" class="changes-empty"></div>
+          </section>
+
+          <section class="terminal term-pane" id="terminal-pane" role="tabpanel" aria-labelledby="pane-tab-terminal" hidden>
+            <div class="term-bar">
+              <div id="terminal-tabs" class="term-tabs" role="tablist" aria-label="Terminals"></div>
+              <button type="button" id="terminal-new" class="icon-btn sm term-new" aria-label="New terminal" data-tip="New terminal" data-tip-kbd="⌘ T" data-icon="plus"></button>
+            </div>
+            <div id="terminal-host" class="term-host"></div>
+            <div id="terminal-empty" class="term-empty" hidden></div>
+          </section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="settings" class="dialog settings-dialog" aria-labelledby="settings-heading" tabindex="-1">
+    <form method="dialog" id="settings-form">
+      <header class="dialog-head">
+        <h2 id="settings-heading">Settings</h2>
+        <button type="button" id="settings-close" class="icon-btn" aria-label="Close" data-icon="x"></button>
+      </header>
+
+      <div class="dialog-body" id="settings-body">
+        <section class="set-section">
+          <div class="set-head">
+            <h3>Model provider</h3>
+            <p>Where OpenAgent sends model requests.</p>
+          </div>
+          <div class="segmented" role="radiogroup" aria-label="Provider">
+            <label><input type="radio" name="provider" value="ollama"><span>Ollama (local)</span></label>
+            <label><input type="radio" name="provider" value="portkey"><span>Portkey (gateway)</span></label>
+          </div>
+          <p class="set-aside"><span id="other-provider-text">Portkey settings are hidden.</span> <button type="button" class="link-btn" id="show-other-provider">Show</button></p>
+        </section>
+
+        <section class="set-section" id="ollama-fields">
+          <div class="set-head">
+            <h3>Ollama</h3>
+            <p>Runs models locally. Pick one that supports tool calling.</p>
+          </div>
+          <label class="field"><span class="field-label">Base URL</span><input id="ollama-baseURL" placeholder="http://localhost:11434/v1" spellcheck="false"></label>
+          <div class="field">
+            <label class="field-label" for="ollama-model">Model</label>
+            <div class="field-row">
+              <input id="ollama-model" list="ollama-models" placeholder="qwen3:8b" spellcheck="false">
+              <datalist id="ollama-models"></datalist>
+              <button type="button" id="refresh-models" class="btn"><span data-icon="refresh" data-icon-size="14"></span><span>Refresh</span></button>
+            </div>
+          </div>
+          <div class="field-grid">
+            <label class="field"><span class="field-label">Context size (tokens)</span><input id="ollama-numCtx" type="number" min="2048" step="1024" placeholder="16384"></label>
+            <label class="field"><span class="field-label">Thinking</span><span class="select"><select id="ollama-think"><option value="auto">Model default</option><option value="on">On</option><option value="off">Off</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span></label>
+          </div>
+          <p class="hint" id="ollama-hint">Ollama's own default context is 4096 tokens, too small for agent work, so OpenAgent asks for the size above.</p>
+        </section>
+
+        <section class="set-section" id="portkey-fields">
+          <div class="set-head">
+            <h3>Portkey</h3>
+            <p>Routes requests through the Portkey AI gateway.</p>
+          </div>
+          <label class="field"><span class="field-label">Base URL</span><input id="portkey-baseURL" placeholder="https://api.portkey.ai/v1" spellcheck="false"></label>
+          <label class="field"><span class="field-label">Portkey API key</span><input id="portkey-apiKey" type="password" placeholder="pk-…" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Model</span><input id="portkey-model" placeholder="@openai/gpt-4o-mini" spellcheck="false"></label>
+          <label class="field narrow"><span class="field-label">Context window (tokens)</span><input id="portkey-contextWindow" type="number" step="any" inputmode="numeric" placeholder="128000"></label>
+          <details class="advanced">
+            <summary><span data-icon="chevron-right" data-icon-size="14"></span>Advanced routing (optional)</summary>
+            <div class="advanced-body">
+              <label class="field"><span class="field-label">Virtual key</span><input id="portkey-virtualKey" placeholder="x-portkey-virtual-key" spellcheck="false"></label>
+              <label class="field"><span class="field-label">Provider slug</span><input id="portkey-provider" placeholder="openai, anthropic, groq…" spellcheck="false"></label>
+              <label class="field"><span class="field-label">Provider API key</span><input id="portkey-providerApiKey" type="password" placeholder="sent as Authorization: Bearer" autocomplete="off"></label>
+              <label class="field"><span class="field-label">Config ID</span><input id="portkey-configId" placeholder="pc-…" spellcheck="false"></label>
+            </div>
+          </details>
+          <p class="hint">Model-catalog ids like <code>@openai/gpt-4o-mini</code> need only the Portkey key. Otherwise set a virtual key, or a provider slug plus that provider's key. The gateway doesn't report the model's context window, so set it above: the context meter and auto-compaction go by it.</p>
+        </section>
+
+        <section class="set-section">
+          <div class="set-head">
+            <h3>Agent</h3>
+            <p>How long a run may go on and what it is told up front.</p>
+          </div>
+          <label class="field narrow"><span class="field-label">Max tool turns per request</span><input id="maxTurns" type="number" min="1" max="500"></label>
+          <label class="field"><span class="field-label">Extra system prompt</span><textarea id="systemPromptExtra" rows="3" placeholder="House rules, coding style, project context…"></textarea></label>
+          <label class="switch-row">
+            <span class="switch-text"><span class="switch-title">Auto-compact context</span><span class="switch-desc">Summarise the conversation on its own when it nears the context window.</span></span>
+            <input type="checkbox" class="switch" id="autoCompact">
+          </label>
+        </section>
+
+        <section class="set-section" id="rules-section">
+          <div class="set-head">
+            <h3>Permissions</h3>
+            <p>Rules saved for <span id="rules-cwd" class="rules-cwd">this project</span>. Matching actions run without an approval card.</p>
+          </div>
+          <div id="rules-list" class="rules-list" hidden>
+            <div class="rules-row" hidden>
+              <span class="rules-label"><span data-icon="terminal" data-icon-size="14"></span><span>Commands</span></span>
+              <div id="rules-programs" class="rules-chips" role="list" aria-label="Commands that run without asking"></div>
+            </div>
+            <div class="rules-row" hidden>
+              <span class="rules-label" title="Auto mode no longer pauses for these"><span data-icon="zap" data-icon-size="14"></span><span>Auto-mode checks</span></span>
+              <div id="rules-reasons" class="rules-chips" role="list" aria-label="Auto-mode checks that no longer pause"></div>
+            </div>
+            <div class="rules-row" hidden>
+              <span class="rules-label"><span data-icon="plug" data-icon-size="14"></span><span>MCP servers</span></span>
+              <div id="rules-mcp" class="rules-chips" role="list" aria-label="MCP servers whose tools run without asking"></div>
+            </div>
+            <div id="rules-edits" class="rules-row rules-edits" hidden>
+              <span class="rules-label"><span data-icon="pencil" data-icon-size="14"></span><span>File edits</span></span>
+              <span class="rules-text">Edits inside the working directory run without asking</span>
+              <button type="button" class="rule-remove" aria-label="Ask again before edits" title="Remove" data-icon="x" data-icon-size="12"></button>
+            </div>
+          </div>
+          <div class="rules-empty" hidden></div>
+          <p id="rules-status" class="rules-status" role="alert" hidden></p>
+        </section>
+
+        <section class="set-section" id="mcp-section">
+          <div class="set-head">
+            <h3>MCP servers</h3>
+            <p>Tools from Model Context Protocol servers. Changes here apply right away.</p>
+          </div>
+          <div id="mcp-list" class="mcp-list" role="list" aria-label="MCP servers"></div>
+          <p id="mcp-status" class="mcp-status" role="alert" hidden></p>
+          <div id="mcp-add" class="mcp-add" role="group" aria-labelledby="mcp-add-title">
+            <div class="mcp-add-title" id="mcp-add-title">Add a server</div>
+            <div class="field-grid">
+              <label class="field"><span class="field-label" id="mcp-name-label">Name</span><input id="mcp-name" placeholder="e.g. github" spellcheck="false" autocomplete="off" autocapitalize="off"></label>
+              <label class="field"><span class="field-label">Scope</span><span class="select"><select id="mcp-scope"><option value="user">This Mac (settings)</option><option value="project">This project (.mcp.json)</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span></label>
+            </div>
+            <label class="field"><span class="field-label">Config</span><textarea id="mcp-spec" class="mono" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents&#10;https://mcp.example.com/mcp&#10;{&quot;command&quot;: &quot;npx&quot;, &quot;args&quot;: [&quot;-y&quot;, &quot;@scope/server&quot;]}"></textarea></label>
+            <p class="hint">A command line, a URL, or the JSON snippet from a server's README. A whole <code>{"mcpServers": …}</code> block adds every server in it, and then the name is optional.</p>
+            <label class="field"><span class="field-label">Environment <span class="field-opt">· KEY=value per line, for command-line servers</span></span><textarea id="mcp-env" class="mono" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="GITHUB_TOKEN=ghp_…&#10;ONE_PER_LINE=value"></textarea></label>
+            <div class="mcp-add-foot">
+              <div id="mcp-add-error" class="mcp-add-error" role="alert" hidden></div>
+              <span class="spacer"></span>
+              <button type="button" id="mcp-add-btn" class="btn"><span data-icon="plus" data-icon-size="14"></span><span>Add server</span></button>
+            </div>
+          </div>
+        </section>
+
+        <section class="set-section">
+          <div class="set-head">
+            <h3>Appearance and behaviour</h3>
+            <p>Theme, session titles, notifications and browser screenshots.</p>
+          </div>
+          <label class="field narrow"><span class="field-label">Theme</span><span class="select"><select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><span class="select-chev" data-icon="chevron-down" data-icon-size="14"></span></span></label>
+          <label class="switch-row">
+            <span class="switch-text"><span class="switch-title">Generated titles</span><span class="switch-desc">Name a session from its first exchange.</span></span>
+            <input type="checkbox" class="switch" id="autoTitles">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text"><span class="switch-title">Notifications</span><span class="switch-desc">Notify when a run finishes or needs approval while OpenAgent is in the background.</span></span>
+            <input type="checkbox" class="switch" id="notifications">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text"><span class="switch-title">Send browser screenshots to the model</span><span class="switch-desc">Needs a vision-capable model.</span></span>
+            <input type="checkbox" class="switch" id="sendScreenshots">
+          </label>
+        </section>
+      </div>
+
+      <footer class="dialog-foot">
+        <span id="settings-status" class="hint"></span>
+        <span class="spacer"></span>
+        <button type="button" id="settings-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="shortcuts" class="dialog shortcuts-dialog" aria-labelledby="shortcuts-heading" tabindex="-1">
+    <header class="dialog-head">
+      <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
+      <button type="button" class="icon-btn" id="shortcuts-close" aria-label="Close" data-icon="x"></button>
+    </header>
+    <div class="dialog-body">
+      <dl class="shortcut-list" id="shortcut-list"></dl>
+    </div>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-desc" tabindex="-1">
+    <div class="confirm-main">
+      <span class="confirm-icon" data-icon="triangle-alert"></span>
+      <div class="confirm-text">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-desc" hidden></p>
+      </div>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" id="confirm-cancel" class="btn">Cancel</button>
+      <button type="button" id="confirm-ok" class="btn danger">Revert</button>
+    </footer>
+  </dialog>
+
+  <dialog id="lightbox" class="lightbox" aria-label="Image preview" tabindex="-1">
+    <button type="button" id="lightbox-close" class="lightbox-close" aria-label="Close" data-icon="x"></button>
+    <figure class="lightbox-figure">
+      <img id="lightbox-img" alt="">
+      <figcaption id="lightbox-caption" class="lightbox-caption" hidden></figcaption>
+    </figure>
+  </dialog>
+
+  <!-- xterm.js (classic UMD builds copied from node_modules by npm run build): sets window.Terminal, FitAddon, WebLinksAddon -->
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="vendor/addon-web-links.js"></script>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

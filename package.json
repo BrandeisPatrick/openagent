@@ -1,0 +1,58 @@
+{
+  "name": "openagent",
+  "version": "0.1.0",
+  "description": "Open-source agentic coding assistant for macOS with a built-in browser. Runs on Ollama (local models) or Portkey (AI gateway).",
+  "main": "dist/main/index.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && mkdir -p dist/renderer/vendor && cp src/renderer/index.html src/renderer/styles.css dist/renderer/ && cp node_modules/@xterm/xterm/lib/xterm.js node_modules/@xterm/xterm/css/xterm.css node_modules/@xterm/addon-fit/lib/addon-fit.js node_modules/@xterm/addon-web-links/lib/addon-web-links.js dist/renderer/vendor/",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "test": "node test/run.js",
+    "brand-dev": "scripts/brand-dev.sh",
+    "package": "npm run build && electron-builder --mac --dir -c.mac.identity=null",
+    "dist": "npm run build && electron-builder --mac -c.mac.identity=null",
+    "icon": "electron scripts/render-icon.js && scripts/make-icns.sh",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "openai": "^7.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2"
+  },
+  "productName": "OpenAgent",
+  "build": {
+    "appId": "dev.openagent.app",
+    "productName": "OpenAgent",
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "files": [
+      "dist/**",
+      "build/icon.png",
+      "skills/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [
+      "build/icon.png",
+      "node_modules/node-pty/**"
+    ],
+    "npmRebuild": false
+  },
+  "author": "OpenAgent contributors"
+}

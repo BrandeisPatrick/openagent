@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e07e5c"/>
+      <stop offset="1" stop-color="#cf6a48"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.12" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS squircle with the standard 100px safe margin -->
+  <path id="tile" d="M100 330C100 203 203 100 330 100h364c127 0 230 103 230 230v364c0 127-103 230-230 230H330C203 924 100 821 100 694V330z" fill="url(#base)"/>
+  <use href="#tile" fill="url(#glow)"/>
+  <use href="#tile" fill="none" stroke="url(#edge)" stroke-width="5"/>
+  <!-- prompt chevron and block cursor -->
+  <g fill="none" stroke="#fbf5ec" stroke-width="70" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M318 378 L462 512 L318 646"/>
+  </g>
+  <rect x="540" y="612" width="180" height="70" rx="35" fill="#fbf5ec"/>
+</svg>
