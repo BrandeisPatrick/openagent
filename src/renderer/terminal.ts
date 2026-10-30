@@ -33,8 +33,8 @@ export interface TerminalPaneOptions {
 export interface TerminalPane {
   /** The pane is on screen: xterms are created for the tabs and fitted, and a first tab opens when there is none */
   setVisible(visible: boolean): void;
-  /** Opens a new shell tab and focuses it */
-  newTab(): Promise<void>;
+  /** Opens a new shell tab and focuses it; resolves to its id (null when no shell could be started) */
+  newTab(): Promise<string | null>;
   /** Focuses the active terminal, or the tab this pane is about to open */
   focus(): void;
   /** True while an xterm in this pane has keyboard focus */
@@ -975,8 +975,8 @@ export function createTerminalPane(o: TerminalPaneOptions): TerminalPane {
       // Deferred so that ⌘T (show the pane, then open a tab) does not open two.
       queueMicrotask(maybeAutoOpen);
     },
-    async newTab() {
-      await createTab({ focus: true });
+    newTab() {
+      return createTab({ focus: true });
     },
     focus() {
       if (!focusActive()) requestFocus(false);

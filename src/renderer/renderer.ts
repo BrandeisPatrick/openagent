@@ -29,7 +29,7 @@ import type {
   TranscriptItem,
 } from '../shared/types';
 import { brandMark, hydrateIcons, icon, type IconName } from './icons.js';
-import { basename, copyWithFeedback, escapeHtml, formatCount, isTextField } from './dom.js';
+import { basename, copyWithFeedback, escapeHtml, formatCount, isTextField, writeClipboard } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { lineDiff, numberRows, parseEditPreview, renderDiff, setDiffBaseDir } from './diff.js';
 import { highlight } from './highlight.js';
@@ -47,6 +47,20 @@ import { createMcpPanel, mcpCardHtml, mockMcpSource, type MockMcpSource } from '
 import { appendWithMentions, createMentionPicker, normalizeMention } from './mentions.js';
 import { createRulesPanel, mockRulesSource } from './rules.js';
 import { cleanTasks, createTaskList } from './tasks.js';
+import { createComposerHistory, createDoublePress, createInstructionFiles, memoryText, oneLine } from './composer.js';
+import {
+  cleanChecks,
+  createSetupStrip,
+  hasModel,
+  isHomeFolder,
+  isLocalOllama,
+  ollamaAddress,
+  ollamaServeCommand,
+  pullCommand,
+  type SetupChecks,
+  type SetupId,
+  type SetupLine,
+} from './setup.js';
 
 declare global {
   interface Window {
@@ -93,6 +107,11 @@ declare global {
         /** Settings → Permissions shows these rules from memory instead of oc.rules; removing one changes only that copy. null goes back to oc.rules */
         mock(rules: ProjectRules | null): void;
       };
+      /**
+       * Renders the welcome screen's setup strip from these checks (true = fine; a key left out counts as fine)
+       * instead of the real ones, which stop re-checking meanwhile; null goes back to the real checks
+       */
+      setup(checks: Partial<SetupChecks> | null): void;
     };
   }
 }
@@ -166,6 +185,8 @@ const lightbox = $<HTMLDialogElement>('lightbox');
 const lightboxImg = $<HTMLImageElement>('lightbox-img');
 const lightboxCaption = $('lightbox-caption');
 const contextMeterBtn = $<HTMLButtonElement>('context-meter');
+const setupEl = $('setup-strip');
+const statusFlash = $('status-flash');
 
 $('empty-mark').innerHTML = brandMark(40);
 
@@ -189,6 +210,8 @@ let tasksEpoch = 0;
 let turnSync = 0;
 /** Paths picked from the @ menu in this window: their tokens become chips in the bubbles sent from here (even @Makefile) */
 const pickedPaths = new Set<string>();
+/** When "Start Ollama" ran `ollama serve` (ms), until Ollama answers or the wait runs out; 0 otherwise */
+let ollamaStartedAt = 0;
 
 const tray = createAttachmentTray({
   root: $('attachments'),
@@ -441,6 +464,11 @@ function addCompaction(info: CompactionInfo): void {
 
 // Assistant text streams into one message; rendering is batched to one Markdown pass per frame.
 const rawByMessage = new WeakMap<HTMLElement, string>();
+
+/** A reply's Markdown source: what its Copy button (and ⌘⇧C for the last reply) copies. */
+function assistantText(msg: HTMLElement): string {
+  return rawByMessage.get(msg) ?? msg.querySelector('.md')?.textContent ?? '';
+}
 let currentAssistant: { el: HTMLElement; md: HTMLElement; raw: string } | null = null;
 let renderQueued = false;
 
@@ -508,7 +536,7 @@ messagesEl.addEventListener('click', (e) => {
   if (msgCopy) {
     const msg = msgCopy.closest<HTMLElement>('.msg.assistant, .msg.user');
     if (msg?.classList.contains('user')) void copyWithFeedback(msgCopy, userTextByMessage.get(msg) ?? msg.querySelector('.bubble')?.textContent ?? '');
-    else if (msg) void copyWithFeedback(msgCopy, rawByMessage.get(msg) ?? msg.querySelector('.md')?.textContent ?? '');
+    else if (msg) void copyWithFeedback(msgCopy, assistantText(msg));
     return;
   }
   const rewindBtn = t.closest<HTMLElement>('.msg-rewind');
@@ -960,6 +988,8 @@ function clearMessages(): void {
   artifactCards.clear();
   activePlan = null;
   turnSync++;
+  // ⌘↑ walks the messages on screen: a walk through the previous session's is over
+  composerHistory.reset();
   setBasePlaceholder(DEFAULT_PLACEHOLDER);
   if (statusState !== 'run') setStatus('off');
   clearBrowsing();
@@ -1089,7 +1119,26 @@ async function restoreImages(srcs: string[]): Promise<void> {
   if (inputs.length) await attachImages(inputs);
 }
 
-/** The bubble's Rewind: confirm, rewind the session to the message's checkpoint, and hand the message back to the composer. */
+/** The message a rewind goes back to, quoted in the confirmation: its text (a long one cut short), or its images. */
+function rewindQuote(msg: HTMLElement): { text: string } | undefined {
+  const text = (userTextByMessage.get(msg) ?? '').trim();
+  if (text) return { text: text.length > 280 ? `${text.slice(0, 280).trimEnd()}…` : text };
+  const images = msg.querySelectorAll('.bubble-image').length;
+  return images ? { text: `${images} image${images === 1 ? '' : 's'}` } : undefined;
+}
+
+/** Esc Esc: the rewind confirmation for the newest message that has a checkpoint (nothing happens without one). */
+function rewindLatest(): void {
+  const msg = [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.user[data-turn]')].pop();
+  if (!msg) return;
+  msg.scrollIntoView({ block: 'nearest' });
+  void rewindTo(msg, sendBtn);
+}
+
+/**
+ * The bubble's Rewind (and Esc Esc): confirm, rewind the session to the message's checkpoint, and hand the message
+ * back to the composer. `button` is where a "has to wait" error shows.
+ */
 async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
   const turn = turnOf(msg);
   if (turn === null || rewinding) return;
@@ -1103,7 +1152,7 @@ async function rewindTo(msg: HTMLElement, button: HTMLElement): Promise<void> {
     addSystemMessage('Rewinding needs the updated app. Restart OpenAgent and try again.', 'error');
     return;
   }
-  const ok = await confirmAction({ title: 'Rewind to this message?', description: REWIND_DESCRIPTION, confirmLabel: 'Rewind', danger: true });
+  const ok = await confirmAction({ title: 'Rewind to this message?', quote: rewindQuote(msg), description: REWIND_DESCRIPTION, confirmLabel: 'Rewind', danger: true });
   if (!ok || rewinding || !msg.isConnected || busy()) return;
   const images = [...msg.querySelectorAll<HTMLImageElement>('.bubble-image img')].map((img) => img.getAttribute('src') ?? '').filter((src) => src.startsWith('data:image/'));
   setRewinding(true);
@@ -1194,7 +1243,7 @@ function syncPlanStatus(): void {
 let spinTimer: number | undefined;
 let spinStep = 0;
 function syncSpin(): void {
-  const want = (running || compacting !== null) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const want = (running || compacting !== null || ollamaStartedAt > 0) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (want && spinTimer === undefined) {
     spinTimer = window.setInterval(() => {
       spinStep = (spinStep + 1) % 12;
@@ -1397,7 +1446,68 @@ async function queueMessage(text: string, images: ImageAttachment[]): Promise<vo
   }
 }
 
+// ---------- "#": a line for the project's instructions file ----------
+
+/** Which instructions file "#" lines went to, per working directory (what the confirmation names) */
+const instructionFiles = createInstructionFiles();
+
+/**
+ * A composer message starting with "#" is not sent to the model (nor queued during a run): after a confirmation its
+ * text, without the "#", is appended to the project's instructions file. The composer keeps the text until it was
+ * added; attached images are not part of it and stay in the composer.
+ */
+async function addToInstructions(memory: string): Promise<void> {
+  hideSlashMenu();
+  mentionPicker.close();
+  const api = oc.instructions;
+  if (!api || typeof api.append !== 'function') {
+    addSystemMessage("Adding to the project's instructions needs the updated app. Restart OpenAgent and try again.", 'error');
+    return;
+  }
+  const typed = inputEl.value;
+  const cwd = config.workingDirectory;
+  const file = instructionFiles.get(cwd);
+  const images = tray.items().length;
+  const imageNote = images
+    ? ` ${images === 1 ? 'The attached image is' : `The ${images} attached images are`} not added; ${images === 1 ? 'it stays' : 'they stay'} in the composer.`
+    : '';
+  const ok = await confirmAction({
+    title: "Add to the project's instructions?",
+    quote: { label: file, text: `- ${oneLine(memory)}`, mono: true },
+    description: `OpenAgent reads ${file} at the start of every run in this project.${imageNote}`,
+    confirmLabel: 'Add',
+    icon: 'file-plus',
+  });
+  if (!ok) {
+    if (!dialogOpen()) inputEl.focus();
+    return;
+  }
+  let res: { path: string; label: string } | null;
+  try {
+    res = await api.append(memory);
+  } catch (err) {
+    addSystemMessage(`Couldn't add to ${file}: ${cleanError(err)}`, 'error');
+    return;
+  }
+  const label = res && typeof res.label === 'string' && res.label.trim() ? res.label.trim() : file;
+  instructionFiles.set(cwd, label);
+  // The text leaves the composer (unless something else was put there meanwhile); the images stay.
+  if (inputEl.value === typed) {
+    inputEl.value = '';
+    autosize();
+    if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+  }
+  const left = tray.items().length;
+  const imagesLeft = left ? ` · ${left === 1 ? 'the image was' : `${left} images were`} not added and ${left === 1 ? 'stays' : 'stay'} in the composer` : '';
+  const note = addSystemMessage(`Added to ${label}${imagesLeft}`, 'notice');
+  if (res && typeof res.path === 'string' && res.path) note.querySelector('span')?.setAttribute('data-tip', res.path);
+  if (!dialogOpen()) inputEl.focus();
+}
+
 async function sendComposer(): Promise<void> {
+  // "#…" goes to the project's instructions, never to the model
+  const memory = memoryText(inputEl.value);
+  if (memory !== null) return addToInstructions(memory);
   const text = inputEl.value.trim();
   const images = tray.items();
   if (!text && !images.length) return;
@@ -1663,6 +1773,18 @@ function autosize(): void {
   updateSendButton();
 }
 
+/** ⌘↑ / ⌘↓: the messages sent in this session (the user bubbles on screen), newest first, then back to the draft */
+const composerHistory = createComposerHistory({
+  input: inputEl,
+  entries: () => [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.user')].map((el) => userTextByMessage.get(el) ?? ''),
+  onRecall: () => {
+    hideSlashMenu();
+    mentionPicker.close();
+    autosize();
+    if (statusState === 'plan-wait') statusHint.hidden = composerHasContent();
+  },
+});
+
 sendBtn.onclick = () => (running ? void oc.abort() : void send());
 stopBtn.onclick = () => void oc.abort();
 $('composer').addEventListener('mousedown', (e) => {
@@ -1692,6 +1814,8 @@ inputEl.addEventListener('click', () => mentionPicker.follow());
 inputEl.addEventListener('keydown', (e) => {
   // ↑ ↓ ↵ Tab Esc go to the @ picker while it shows rows; otherwise Enter sends as usual.
   if (mentionPicker.handleKey(e)) return;
+  // ⌘↑ / ⌘↓ on the first / last line walk the sent messages (also while the slash menu shows)
+  if (composerHistory.handleKey(e)) return;
   if (!slashMenu.hidden) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -1869,6 +1993,45 @@ function focusSearch(): void {
   sessionSearch.select();
 }
 
+// Esc Esc between runs opens the rewind confirmation. Every Esc is seen here first; only the ones that reach the
+// shortcut handler below unused count, so an Esc that closed a menu or answered a card in between breaks the pair.
+const escEsc = createDoublePress(600);
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (e.key === 'Escape') escEsc.saw(e.timeStamp);
+    else if (e.key !== 'Shift' && e.key !== 'Meta' && e.key !== 'Control' && e.key !== 'Alt') escEsc.reset();
+  },
+  true,
+);
+
+/** An Esc that can be half of Esc Esc: a plain press, nothing running, no dialog or menu open, no card waiting for an answer. */
+function escCounts(e: KeyboardEvent): boolean {
+  return (
+    !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing && !e.defaultPrevented &&
+    !running && compacting === null && !rewinding && !pendingApproval && !titleEditing && !dialogOpen() && !isMenuOpen()
+  );
+}
+
+// ⌘⇧C copies the last reply's Markdown (what its Copy button copies) and says so in the status area.
+let flashTimer: number | undefined;
+
+/** A short tooltip in the status area above the composer (#status-flash, also announced to screen readers). */
+function flashStatus(text: string, iconName: IconName = 'check'): void {
+  statusFlash.innerHTML = `${icon(iconName, 14)}<span>${escapeHtml(text)}</span>`;
+  statusFlash.classList.add('show');
+  window.clearTimeout(flashTimer);
+  flashTimer = window.setTimeout(() => statusFlash.classList.remove('show'), 1200);
+}
+
+async function copyLastReply(): Promise<void> {
+  const msg = [...messagesEl.querySelectorAll<HTMLElement>(':scope > .msg.assistant')].pop();
+  const text = msg ? assistantText(msg) : '';
+  if (!text.trim()) return flashStatus('No reply to copy yet', 'info');
+  if (await writeClipboard(text)) flashStatus('Copied');
+  else flashStatus("Couldn't copy the reply", 'circle-alert');
+}
+
 document.addEventListener('keydown', (e) => {
   const meta = e.metaKey || e.ctrlKey;
   const k = e.key.toLowerCase();
@@ -1877,6 +2040,11 @@ document.addEventListener('keydown', (e) => {
   if (inTerminal && (e.key === 'Escape' || (e.ctrlKey && !e.metaKey))) return;
   if (e.key === 'Escape' && (running || compacting?.standalone) && !pendingApproval && !isMenuOpen() && !dialogOpen()) {
     void oc.abort();
+  } else if (e.key === 'Escape') {
+    if (escCounts(e) && escEsc.counts()) {
+      e.preventDefault();
+      rewindLatest();
+    }
   } else if (e.key === 'Tab' && e.shiftKey && document.activeElement === inputEl) {
     e.preventDefault();
     void toggleMode();
@@ -1894,6 +2062,10 @@ document.addEventListener('keydown', (e) => {
   } else if (k === 'b' && e.shiftKey) {
     e.preventDefault();
     togglePane('browser');
+  } else if (k === 'c' && e.shiftKey) {
+    if (dialogOpen()) return;
+    e.preventDefault();
+    void copyLastReply();
   } else if (k === 'd' && e.shiftKey) {
     e.preventDefault();
     togglePane('diff');
@@ -2043,49 +2215,218 @@ function applyConfigToUi(): void {
     lastConnKey = connKey;
     void checkConnection();
   }
+  // The folder line follows the working directory; the provider decides which lines can show at all.
+  syncConnection();
   void refreshVisionNote();
 }
 
-// ---------- Provider connection banner ----------
+// ---------- Provider connection: the banner above the composer and the welcome screen's setup strip ----------
 
 const connBanner = $('conn-banner');
 const connText = $('conn-text');
 let lastConnKey = '';
 let connCheck = 0;
+/** What the last finished check found about Ollama (null before the first one, and with Portkey) */
+let ollamaHealth: { reachable: boolean; models: string[] } | null = null;
+/** The banner's text while Ollama is unreachable or the configured model is missing; null when fine */
+let connProblem: string | null = null;
 
-/** Shows a banner when Ollama is unreachable or the configured model is not downloaded; silent otherwise. */
+/**
+ * Asks Ollama for its models. Unreachable, or the configured model not downloaded: a banner above the composer
+ * (silent otherwise). The same answer drives the setup strip, which takes the banner's place on the welcome screen.
+ */
 async function checkConnection(): Promise<void> {
   const my = ++connCheck;
   if (config.provider !== 'ollama') {
-    connBanner.hidden = true;
+    ollamaHealth = null;
+    connProblem = null;
+    syncConnection();
     return;
   }
+  let models: string[] | null;
   try {
-    const models = await oc.listOllamaModels();
-    if (my !== connCheck) return;
-    const m = config.ollama.model;
-    const have = (x: string) => x === m || x === `${m}:latest` || m === `${x}:latest`;
-    if (m && models.length && !models.some(have)) {
-      connText.textContent = `Ollama is running, but ${m} is not downloaded. Run: ollama pull ${m}`;
-      connBanner.hidden = false;
-    } else connBanner.hidden = true;
+    const list = await oc.listOllamaModels();
+    models = Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
   } catch {
-    if (my !== connCheck) return;
-    connText.textContent = `Can't reach Ollama at ${config.ollama.baseURL.replace(/\/v1\/?$/, '')}. Start it with "ollama serve", then retry.`;
-    connBanner.hidden = false;
+    models = null;
   }
+  if (my !== connCheck) return;
+  const m = config.ollama.model;
+  if (models) {
+    ollamaHealth = { reachable: true, models };
+    connProblem = m && models.length && !hasModel(models, m) ? `Ollama is running, but ${m} is not downloaded. Run: ollama pull ${m}` : null;
+  } else {
+    ollamaHealth = { reachable: false, models: [] };
+    connProblem = `Can't reach Ollama at ${config.ollama.baseURL.replace(/\/v1\/?$/, '')}. Start it with "ollama serve", then retry.`;
+  }
+  syncConnection();
 }
 $('conn-retry').onclick = () => void checkConnection();
 $('conn-settings').onclick = () => openSettings();
 
-cwdBtn.onclick = async () => {
-  const dir = await oc.chooseDirectory();
-  if (dir) {
-    config = await oc.getConfig();
-    applyConfigToUi();
-    addSystemMessage(`Working directory set to ${dir}`, 'notice');
+/** How long "Start Ollama" waits for Ollama to answer before the line offers the button again */
+const START_WAIT_MS = 20_000;
+/** The last "Start Ollama" ran out of time without an answer */
+let ollamaStartFailed = false;
+/** The debug hook's checks, shown instead of the real ones */
+let debugSetup: SetupChecks | null = null;
+let setupTimer: number | undefined;
+
+const setupStrip = createSetupStrip({
+  root: setupEl,
+  onAction: (id, button) => void setupAction(id, button),
+});
+
+/** Which checks pass: the debug hook's, or the real ones (unknown counts as fine, so nothing flashes before the first answer). */
+function setupChecks(): SetupChecks {
+  if (debugSetup) return debugSetup;
+  const folder = !isHomeFolder(config.workingDirectory);
+  const h = config.provider === 'ollama' ? ollamaHealth : null;
+  return { ollama: !h || h.reachable, model: !h || !h.reachable || hasModel(h.models, config.ollama.model), folder };
+}
+
+function ollamaLine(): SetupLine {
+  const base = config.ollama.baseURL;
+  const address = ollamaAddress(base);
+  // Ollama on another machine cannot be started from here: the fix is the address.
+  if (!isLocalOllama(base)) return { id: 'ollama', icon: 'server', title: "Can't reach Ollama", detail: address, action: 'Open settings', actionTip: 'Check the Ollama address' };
+  if (ollamaStartedAt) return { id: 'ollama', icon: 'server', title: 'Starting Ollama…', detail: address, action: 'Starting…', busy: true };
+  const command = ollamaServeCommand(base);
+  const title = ollamaStartFailed ? "Ollama isn't answering yet" : "Ollama isn't running";
+  const detail = ollamaStartFailed ? 'see the Terminal tab' : address;
+  // Without the app's terminal the line shows the command to run instead.
+  if (!terminalSource()) return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', command, commandNote: 'Run it in a terminal; this line goes away once Ollama answers.' };
+  return { id: 'ollama', icon: 'server', title, detail, action: 'Start Ollama', actionTip: `Runs ${command} in a new terminal tab` };
+}
+
+function modelLine(): SetupLine {
+  const model = config.ollama.model.trim();
+  const models = ollamaHealth?.reachable ? ollamaHealth.models : [];
+  if (!model && models.length) {
+    return { id: 'model', icon: 'download', title: 'No model selected', detail: `${models.length} downloaded`, action: 'Choose model', actionTip: 'Pick one of your downloaded models' };
   }
-};
+  return {
+    id: 'model',
+    icon: 'download',
+    title: model ? `${model} isn't downloaded` : 'No model downloaded yet',
+    action: 'Pull a model',
+    command: pullCommand(model),
+    commandNote: 'Run it in a terminal; this line goes away once the download is done.',
+  };
+}
+
+/** The strip's lines: Ollama and the model only with the Ollama provider, the folder line with either. */
+function setupLines(): SetupLine[] {
+  const checks = setupChecks();
+  const lines: SetupLine[] = [];
+  if (config.provider === 'ollama') {
+    if (!checks.ollama) lines.push(ollamaLine());
+    if (!checks.model) lines.push(modelLine());
+  }
+  if (!checks.folder) lines.push({ id: 'folder', icon: 'folder', title: 'Working in your home folder', action: 'Choose folder', actionTip: 'Choose the project folder OpenAgent works in' });
+  return lines;
+}
+
+/** After a check, a config change, the welcome screen showing or hiding, or the debug hook: the strip, the banner, the next check. */
+function syncConnection(): void {
+  if (!config) return;
+  if (ollamaStartedAt) {
+    const answered = config.provider !== 'ollama' || ollamaHealth?.reachable === true;
+    if (answered || Date.now() - ollamaStartedAt > START_WAIT_MS) {
+      ollamaStartFailed = !answered;
+      ollamaStartedAt = 0;
+      syncSpin();
+    }
+  }
+  if (ollamaHealth?.reachable) ollamaStartFailed = false;
+  setupStrip.render(setupLines());
+  // On the welcome screen the strip says it with a fix at hand; the banner returns once the conversation starts.
+  const covered = !emptyState.hidden && setupStrip.lines().some((id) => id !== 'folder');
+  connText.textContent = connProblem ?? '';
+  connBanner.hidden = !connProblem || covered;
+  scheduleSetupCheck();
+}
+
+/** While the welcome screen shows an Ollama line, Ollama is asked again (every 5s, every second while it starts), so the line goes once fixed. */
+function scheduleSetupCheck(): void {
+  window.clearTimeout(setupTimer);
+  setupTimer = undefined;
+  const watching = !debugSetup && config.provider === 'ollama' && !emptyState.hidden && setupStrip.lines().some((id) => id !== 'folder');
+  if (!watching && !ollamaStartedAt) return;
+  setupTimer = window.setTimeout(
+    () => {
+      setupTimer = undefined;
+      if (ollamaStartedAt || document.visibilityState === 'visible') void checkConnection();
+      else scheduleSetupCheck();
+    },
+    ollamaStartedAt ? 1000 : 5000,
+  );
+}
+// The welcome screen shows or hides (addNode sets hidden on every new node, so only real changes count).
+let welcomeShown = !emptyState.hidden;
+new MutationObserver(() => {
+  if (welcomeShown === !emptyState.hidden) return;
+  welcomeShown = !emptyState.hidden;
+  syncConnection();
+}).observe(emptyState, { attributes: true, attributeFilter: ['hidden'] });
+// Back from a terminal where Ollama was started or a model pulled: check right away.
+window.addEventListener('focus', () => {
+  if (!config || debugSetup || config.provider !== 'ollama' || emptyState.hidden) return;
+  if (setupStrip.lines().some((id) => id !== 'folder')) void checkConnection();
+});
+
+async function setupAction(id: SetupId, button: HTMLButtonElement): Promise<void> {
+  if (id === 'folder') {
+    if ((await chooseFolder()) && !dialogOpen()) inputEl.focus();
+  } else if (id === 'model') {
+    // "Choose model" (a pull shows its command instead): the model chip's menu
+    modelBtn.click();
+  } else if (!isLocalOllama(config.ollama.baseURL)) openSettings('ollama-baseURL');
+  else await startOllama(button);
+}
+
+/** "Start Ollama": `ollama serve` in a new terminal tab (the Terminal pane comes forward), then Ollama is asked every second until it answers. */
+async function startOllama(button: HTMLButtonElement): Promise<void> {
+  const term = terminalSource();
+  if (!term || ollamaStartedAt) return;
+  const command = ollamaServeCommand(config.ollama.baseURL);
+  showPaneTab('terminal');
+  const id = await terminalPane.newTab();
+  if (!id) {
+    showInlineError(button, `Couldn't open a terminal. Run ${command} yourself, then come back.`);
+    return;
+  }
+  try {
+    term.write(id, `${command}\r`);
+  } catch (err) {
+    showInlineError(button, `Couldn't start Ollama: ${cleanError(err)}`);
+    return;
+  }
+  ollamaStartedAt = Date.now();
+  ollamaStartFailed = false;
+  syncSpin();
+  syncConnection();
+}
+
+/**
+ * The working-directory picker (the top bar's folder and the setup strip's "Choose folder"). In an empty session
+ * the top bar and the strip show the change; a notice would replace the welcome screen.
+ */
+async function chooseFolder(): Promise<boolean> {
+  let dir: string | null;
+  try {
+    dir = await oc.chooseDirectory();
+  } catch (err) {
+    showInlineError(cwdBtn, `Couldn't change the folder: ${cleanError(err)}`);
+    return false;
+  }
+  if (!dir) return false;
+  config = await oc.getConfig();
+  applyConfigToUi();
+  if (emptyState.hidden) addSystemMessage(`Working directory set to ${dir}`, 'notice');
+  return true;
+}
+cwdBtn.onclick = () => void chooseFolder();
 
 /** Keeps the native browser view glued to its slot while something animates the layout. */
 function trackBounds(ms: number): void {
@@ -2662,11 +3003,29 @@ function setChangeCount(n: number): void {
   paneTabDiff.setAttribute('aria-label', count ? `Diff, ${files}` : 'Diff');
 }
 
-/** A small in-app confirmation (the native browser view is hidden while it is open). */
+/**
+ * A small in-app confirmation (the native browser view is hidden while it is open). Danger: the warning badge, a red
+ * button and the focus on Cancel; otherwise the accent badge with `icon` and the focus on the button.
+ */
 function confirmAction(opts: ConfirmOptions): Promise<boolean> {
   if (confirmDialog.open) return Promise.resolve(false);
   closeMenu();
   $('confirm-title').textContent = opts.title;
+  const badge = confirmDialog.querySelector<HTMLElement>('.confirm-icon');
+  if (badge) {
+    badge.innerHTML = icon(opts.danger ? 'triangle-alert' : (opts.icon ?? 'info'));
+    badge.classList.toggle('tone-accent', !opts.danger);
+  }
+  const quote = opts.quote && opts.quote.text ? opts.quote : null;
+  const quoteEl = $('confirm-quote');
+  const quoteLabel = $('confirm-quote-label');
+  const quoteText = $('confirm-quote-text');
+  quoteEl.hidden = !quote;
+  quoteEl.classList.toggle('mono', Boolean(quote?.mono));
+  quoteLabel.innerHTML = quote?.label ? `${icon('file-text', 14)}<span>${escapeHtml(quote.label)}</span>` : '';
+  quoteLabel.hidden = !quote?.label;
+  quoteText.textContent = quote?.text ?? '';
+  quoteText.scrollTop = 0;
   const desc = $('confirm-desc');
   desc.textContent = opts.description ?? '';
   desc.hidden = !opts.description;
@@ -2676,7 +3035,7 @@ function confirmAction(opts: ConfirmOptions): Promise<boolean> {
   ok.className = `btn ${opts.danger ? 'danger' : 'primary'}`;
   oc.browser.setVisible(false);
   confirmDialog.showModal();
-  cancel.focus();
+  (opts.danger ? cancel : ok).focus();
   return new Promise((resolve) => {
     const finish = (value: boolean) => {
       ok.onclick = null;
@@ -3131,7 +3490,8 @@ const rulesPanel = createRulesPanel({
 
 // ---------- Shortcuts sheet ----------
 
-const SHORTCUTS: [string, string[]][] = [
+/** Label, keys, and an alternative (shown as "⌘↑ / ⌘↓") */
+const SHORTCUTS: [string, string[], string[]?][] = [
   ['New session', ['⌘', 'N']],
   ['Toggle sidebar', ['⌘', 'B']],
   ['Toggle browser', ['⌘', '⇧', 'B']],
@@ -3141,15 +3501,22 @@ const SHORTCUTS: [string, string[]][] = [
   ['Settings', ['⌘', ',']],
   ['Cycle permission mode', ['⇧', 'Tab']],
   ['Stop the run', ['Esc']],
+  ['Rewind to your last message', ['Esc', 'Esc']],
   ['Focus the composer', ['⌘', 'K']],
   ['Clear the terminal (in a terminal)', ['⌘', 'K']],
   ['Search sessions', ['⌘', 'F']],
   ['Rename session', ['F2']],
   ['New line in the composer', ['⇧', '↵']],
+  ['Previous or next message you sent', ['⌘', '↑'], ['⌘', '↓']],
+  ['Copy the last reply', ['⌘', '⇧', 'C']],
   ['Mention a file', ['@']],
+  ["Add to the project's instructions", ['#']],
   ['Keyboard shortcuts', ['⌘', '/']],
 ];
-$('shortcut-list').innerHTML = SHORTCUTS.map(([label, keys]) => `<dt>${escapeHtml(label)}</dt><dd>${keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</dd>`).join('');
+const kbds = (keys: string[]) => keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('');
+$('shortcut-list').innerHTML = SHORTCUTS.map(
+  ([label, keys, alt]) => `<dt>${escapeHtml(label)}</dt><dd>${kbds(keys)}${alt ? `<span class="kbd-sep">/</span>${kbds(alt)}` : ''}</dd>`,
+).join('');
 
 function openShortcuts(): void {
   if (dialogOpen()) return;
@@ -3240,6 +3607,12 @@ window.__oc_debug = {
       debugRules = rules && typeof rules === 'object' ? mockRulesSource(rules, config?.workingDirectory ?? '') : null;
       void rulesPanel.refresh();
     },
+  },
+  setup(checks: Partial<SetupChecks> | null) {
+    debugSetup = checks && typeof checks === 'object' ? cleanChecks(checks) : null;
+    syncConnection();
+    // Back to the real checks: ask Ollama again now
+    if (!debugSetup && config) void checkConnection();
   },
 };
 

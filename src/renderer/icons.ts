@@ -72,6 +72,9 @@ const ICONS = {
   circle: '<circle cx="8" cy="8" r="5.5"/>',
   'arrow-filled': '<path d="M5.75 4.25v7.5L11.75 8z" fill="currentColor"/>',
   'circle-check': '<circle cx="8" cy="8" r="6"/><path d="M5.5 8.25l1.75 1.75 3.25-3.5"/>',
+  // Setup strip: the model server (two stacked units with their lights) and a download (arrow into a tray)
+  server: `<rect x="2.25" y="2.5" width="11.5" height="4.75" rx="1.25"/><rect x="2.25" y="8.75" width="11.5" height="4.75" rx="1.25"/>${dot(4.75, 4.875, 0.8)}${dot(4.75, 11.125, 0.8)}`,
+  download: '<path d="M8 2.25v8M4.75 7L8 10.25 11.25 7M2.75 11.25v1c0 .83.67 1.5 1.5 1.5h7.5c.83 0 1.5-.67 1.5-1.5v-1"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;

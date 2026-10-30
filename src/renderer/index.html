@@ -48,6 +48,7 @@
               <div class="empty-mark" id="empty-mark"></div>
               <h1 class="empty-title">What should we build?</h1>
               <p class="empty-text">OpenAgent reads and edits code, runs commands and browses the web. Side effects ask first unless you change the mode. Type <kbd>@</kbd> to mention a file, <kbd>/</kbd> for skills.</p>
+              <div id="setup-strip" class="setup-strip" role="list" aria-label="Finish setting up" hidden></div>
               <div class="empty-suggestions" id="empty-suggestions"></div>
             </div>
           </div>
@@ -73,6 +74,7 @@
               <button id="stop-btn" class="stop-hint" data-tip="Stop the run"><kbd>esc</kbd><span>to interrupt</span></button>
               <span id="status-hint" class="status-hint"><kbd>↵</kbd><span>build</span><kbd>esc</kbd><span>keep planning</span></span>
             </div>
+            <div id="status-flash" class="status-flash" role="status" aria-live="polite"></div>
             <div id="slash-menu" class="slash-menu" role="listbox" hidden></div>
             <div id="mention-menu" class="slash-menu mention-menu" role="listbox" aria-label="Files" hidden></div>
             <div class="composer" id="composer">
@@ -311,11 +313,15 @@
     </div>
   </dialog>
 
-  <dialog id="confirm-dialog" class="dialog confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-desc" tabindex="-1">
+  <dialog id="confirm-dialog" class="dialog confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-quote-text confirm-desc" tabindex="-1">
     <div class="confirm-main">
       <span class="confirm-icon" data-icon="triangle-alert"></span>
       <div class="confirm-text">
         <h2 id="confirm-title"></h2>
+        <figure id="confirm-quote" class="confirm-quote" hidden>
+          <figcaption id="confirm-quote-label" class="confirm-quote-label" hidden></figcaption>
+          <blockquote id="confirm-quote-text" class="confirm-quote-text"></blockquote>
+        </figure>
         <p id="confirm-desc" hidden></p>
       </div>
     </div>

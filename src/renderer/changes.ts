@@ -3,13 +3,21 @@
 import type { ChangeDiff, ChangeEntry, ChangesApi } from '../shared/types';
 import { basename, dirname, escapeHtml } from './dom.js';
 import { lineDiff, numberRows, renderDiff, statHtml, type DiffRow } from './diff.js';
-import { icon } from './icons.js';
+import { icon, type IconName } from './icons.js';
 
 export interface ConfirmOptions {
   title: string;
   description?: string;
   confirmLabel: string;
+  /** Red confirm button, the warning triangle, and Cancel has the focus; otherwise the accent button has it */
   danger?: boolean;
+  /** The badge's icon when not danger (default info) */
+  icon?: IconName;
+  /**
+   * A text block between the title and the description, e.g. the line a "#" message adds (labelled with the file,
+   * in mono) or the message a rewind returns to
+   */
+  quote?: { text: string; label?: string; mono?: boolean };
 }
 
 export interface ChangesPaneOptions {

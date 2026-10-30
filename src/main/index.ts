@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { AgentEvent, AppConfig, ApprovalScope, Bounds, ImageAttachment, McpScope, McpServerInfo, ModelCapabilities, ProjectRules, StoredRules } from '../shared/types';
 import { McpManager, PROJECT_FILE } from './mcp';
 import { searchFiles } from './files';
+import { appendInstruction } from './instructions';
 import { ARTIFACT_SCHEME, ArtifactStore } from './artifacts';
 import { loadConfig, normalizeConfig, saveConfig } from './config';
 import { BrowserController } from './browser';
@@ -384,6 +385,7 @@ function registerIpc(): void {
   });
   ipcMain.handle('skills:list', () => currentSkills().map(toInfo));
   ipcMain.handle('files:search', (_e, query: string, limit?: number) => searchFiles(config.workingDirectory, String(query ?? ''), Number(limit) || 50));
+  ipcMain.handle('instructions:append', (_e, text: string) => appendInstruction(config.workingDirectory, String(text ?? '')));
   ipcMain.handle('rules:list', () => projectRules());
   ipcMain.handle('rules:remove', (_e, kind: string, value?: string) =>
     saveProjectRules((r) => {

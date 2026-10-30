@@ -217,6 +217,14 @@ export interface FileHit {
   isDir: boolean;
 }
 
+export interface InstructionsApi {
+  /**
+   * Appends a bullet to the project's instructions file (the first of OPENAGENT.md, OPENCODER.md, AGENTS.md, CLAUDE.md
+   * in the working directory; OPENAGENT.md is created when none exists). Returns the file and its short label.
+   */
+  append(text: string): Promise<{ path: string; label: string }>;
+}
+
 export interface FilesApi {
   /** Fuzzy search over the working directory's files and folders (ignores node_modules, .git, build output …); best matches first */
   search(query: string, limit?: number): Promise<FileHit[]>;
@@ -478,6 +486,7 @@ export interface OpenAgentApi {
   respondApproval(id: string, ok: boolean, always?: boolean, scope?: ApprovalScope): Promise<AppConfig>;
   files: FilesApi;
   rules: RulesApi;
+  instructions: InstructionsApi;
   onAgentEvent(cb: (ev: AgentEvent) => void): () => void;
   sessions: SessionsApi;
   skills: SkillsApi;

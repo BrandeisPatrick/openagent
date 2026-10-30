@@ -20,14 +20,23 @@ MCP servers · context meter, auto-compaction and `/compact` · project instruct
 | 4 | **Rewind** to an earlier message: restore the files changed since then and reopen that prompt in the composer (Claude Code's checkpoints / `/rewind`) | The way out when a run went wrong | done (tick 2) |
 | 5 | **Task list** maintained by the agent (a checklist card that updates in place while it works) | The desktop app pins the agent's plan under its latest message | done (tick 2) |
 | 6 | **Message actions on hover**: copy a user message, re-send an edited one | Small, constant friction | done (tick 2) |
-| 7 | **`#` memory shortcut**: a message starting with `#` appends to the project's instructions file after confirmation | Claude Code's quick way to teach the project | tick 3 |
-| 8 | **Keyboard polish**: Esc Esc for rewind, ⌘↑/⌘↓ history in the composer, ⌘⇧C copy last reply | Power-user parity | tick 3 |
-| 9 | **Welcome and empty states**: recent sessions and project hints on the empty screen, first-run checklist (Ollama running, model pulled, folder chosen) | First five minutes | tick 3 |
+| 7 | **`#` memory shortcut**: a message starting with `#` appends to the project's instructions file after confirmation | Claude Code's quick way to teach the project | done (tick 3) |
+| 8 | **Keyboard polish**: Esc Esc for rewind, ⌘↑/⌘↓ history in the composer, ⌘⇧C copy last reply | Power-user parity | done (tick 3) |
+| 9 | **Welcome and empty states**: recent sessions and project hints on the empty screen, first-run checklist (Ollama running, model pulled, folder chosen) | First five minutes | done (tick 3) |
 | 10 | **Transcript details**: collapse long tool output by default with "show more", sticky date dividers, unread marker when returning to a session | Reading long sessions | later |
 | 11 | **Diff pane review**: accept/revert per hunk, "open in editor" per line | Reviewing larger changes | later |
 | 12 | **Subagents / background tasks** with a Tasks pane | Parallel work; heavy for small local models | later |
 
 Out of scope: hosted features (cloud sessions, remote control), Anthropic-specific fonts and branding, usage billing.
+
+## Tick 3 renderer spec (items 7–9)
+
+Contract: `OpenCoderApi.instructions.append(text)` → `{ path, label }` (main appends a bullet to the project's instructions file, creating `OPENAGENT.md` when none exists) in `src/shared/types.ts`.
+
+- **`#` memory shortcut**: a composer message that starts with `#` (followed by a space or text) is not sent to the model. Instead the existing confirm dialog asks "Add to the project's instructions?" with the text and the target label (from `oc.instructions.append` the first time it is known, else "OPENAGENT.md"), OK = "Add". On OK call `oc.instructions.append(text without the leading #)`, then show a system notice "Added to OPENAGENT.md" (the returned label) and clear the composer; on cancel keep the text. Images attached are ignored for this path (notice says so). While a run is going, `#` messages are still handled this way, not queued.
+- **Keyboard**: `Esc` twice within 600 ms while no run is going opens the rewind confirm for the latest user message that has a `turn` (nothing happens when there is none); the single `Esc` keeps its meaning (stop a run, close menus). `⌘↑` / `⌘↓` in the composer when the caret is on the first/last line (or the composer is empty) walk through the session's previous user messages (newest first), restoring the draft when walking past the end; the history comes from the rendered user bubbles. `⌘⇧C` copies the last assistant reply's Markdown source (the same text the Copy button copies) and flashes a short "Copied" tooltip on the status area. Add the three to the shortcuts sheet.
+- **Welcome and empty states**: the empty state gains a compact setup strip (`#setup-strip`) above the suggestion chips, shown only when something is missing: Ollama unreachable (reuse the connection check), the configured model not in `listOllamaModels()`, or the working directory still the home folder. Each line has a short action ("Start Ollama", "Pull a model" → shows the `ollama pull qwen3:8b` command with a Copy button, "Choose folder" → the existing cwd picker). It disappears once all three are fine; it is never shown for the Portkey provider except the folder line.
+- **Debug hooks**: `__oc_debug.setup({ ollama: boolean, model: boolean, folder: boolean })` renders the strip directly; `null` restores the real checks.
 
 ## How changes are verified
 

@@ -1417,3 +1417,69 @@ dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
   .task-card, .task-row.fade-in { animation: none; }
   .task-head-chev { transition: none; }
 }
+
+/* ---------- Tick 3: the setup strip, the "#" and rewind confirms, the Copied flash, shortcut sheet ---------- */
+
+/* Setup strip: on the welcome screen, above the suggestions; one line per missing piece, each with its fix */
+.setup-strip {
+  display: flex; flex-direction: column; width: min(520px, 100%); margin-top: 20px;
+  background: var(--bg-000); border: 1px solid var(--border-subtle); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
+  text-align: left; animation: fade-in 0.12s ease-out both;
+  container-type: inline-size;
+}
+.setup-strip:not([hidden]) + .empty-suggestions { margin-top: 14px; }
+/* A narrow column keeps the titles and drops the details rather than squeezing both */
+@container (max-width: 400px) { .setup-detail { display: none; } }
+.setup-item + .setup-item { border-top: 1px solid var(--border-subtle); }
+.setup-line { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 8px 6px 12px; }
+.setup-icon { display: inline-flex; flex: none; color: color-mix(in srgb, var(--git-mod) 80%, var(--bg-000)); }
+.setup-text { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; font-size: 13px; line-height: 18px; white-space: nowrap; }
+.setup-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-100); }
+.setup-detail { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-400); }
+.setup-detail::before { content: '·'; margin-right: 6px; }
+.setup-action { flex: none; }
+.setup-action .spinner { display: none; }
+.setup-action.busy { color: var(--text-400); cursor: default; }
+.setup-action.busy:hover { background: var(--bg-000); }
+.setup-action.busy .spinner { display: inline-block; }
+.setup-action[aria-expanded="true"] { background: var(--bg-300); }
+.setup-cmd { padding: 0 12px 12px 38px; }
+.setup-cmd .cmd { align-items: baseline; padding: 3px 3px 3px 10px; }
+.setup-cmd .cmd code { flex: 1; }
+.setup-copy {
+  display: inline-flex; align-items: center; gap: 4px; flex: none; height: 24px; padding: 0 8px; border-radius: var(--r-control);
+  font: 12px/16px var(--font); color: var(--text-400); transition: background-color 0.12s, color 0.12s;
+}
+.setup-copy:hover { background: var(--code-hover); color: var(--text-100); }
+.setup-copy.copied { color: var(--success); }
+.setup-note { margin: 6px 0 0; font-size: 12px; line-height: 16px; color: var(--text-400); }
+
+/* Confirm dialog: a non-danger confirmation (the "#" memory) has the accent badge; a quote shows what it is about */
+.confirm-text { flex: 1; }
+.confirm-icon.tone-accent { background: var(--accent-soft); color: var(--accent); }
+.confirm-quote { margin: 10px 0 0; overflow: hidden; background: var(--bg-100); border: 1px solid var(--border-subtle); border-radius: var(--r-card); }
+.confirm-quote-label { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-200); }
+.confirm-quote-label .icon { color: var(--text-400); }
+.confirm-quote-text { margin: 0; padding: 8px 10px; max-height: 144px; overflow-y: auto; font-size: 13px; line-height: 18px; color: var(--text-100); white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirm-quote.mono .confirm-quote-text { font: 12px/18px var(--mono); }
+.confirm-quote:not([hidden]) + p { margin-top: 10px; }
+
+/* ⌘⇧C: a short "Copied" tooltip in the status area above the composer */
+.status-flash {
+  position: absolute; left: 50%; bottom: calc(100% + 6px); z-index: 6;
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: var(--r-control);
+  background: var(--text-100); color: var(--bg-100); box-shadow: var(--shadow-pop);
+  font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; pointer-events: none;
+  opacity: 0; transform: translate(-50%, 2px); transition: opacity 0.12s, transform 0.12s;
+}
+.status-flash:empty { display: none; }
+.status-flash.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Shortcut sheet: compact rows, and "⌘↑ / ⌘↓" pairs */
+.shortcut-list dt, .shortcut-list dd { height: 32px; }
+.shortcut-list .kbd-sep { margin: 0 2px; font-size: 12px; color: var(--text-400); }
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-strip { animation: none; }
+  .status-flash { transition: none; }
+}

@@ -31,6 +31,9 @@ const api: OpenAgentApi = {
   files: {
     search: (query: string, limit?: number): Promise<FileHit[]> => ipcRenderer.invoke('files:search', query, limit ?? 50),
   },
+  instructions: {
+    append: (text: string): Promise<{ path: string; label: string }> => ipcRenderer.invoke('instructions:append', text),
+  },
   rules: {
     list: (): Promise<ProjectRules> => ipcRenderer.invoke('rules:list'),
     remove: (kind: 'program' | 'reason' | 'edits' | 'mcp', value?: string): Promise<ProjectRules> => ipcRenderer.invoke('rules:remove', kind, value),

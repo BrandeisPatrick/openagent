@@ -51,6 +51,32 @@ export function loadInstructions(cwd: string): InstructionFile[] {
   return out;
 }
 
+/**
+ * Appends one bullet to the project's instructions file (the first existing of INSTRUCTION_FILES; OPENAGENT.md is
+ * created when none exists), for the composer's "#" shortcut. Returns the file and its label.
+ */
+export function appendInstruction(cwd: string, text: string): { path: string; label: string } {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (!line) throw new Error('Nothing to add.');
+  let label = INSTRUCTION_FILES.find((name) => {
+    try {
+      return fs.statSync(path.join(cwd, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
+  const file = path.join(cwd, label ?? INSTRUCTION_FILES[0]);
+  let current = '';
+  if (label) current = fs.readFileSync(file, 'utf8');
+  else {
+    label = INSTRUCTION_FILES[0];
+    current = '# Project instructions\n\nNotes for the agent working in this project.\n';
+  }
+  const sep = current.endsWith('\n') ? '' : '\n';
+  fs.writeFileSync(file, `${current}${sep}- ${line}\n`);
+  return { path: file, label };
+}
+
 /** The system-prompt section for the files, or '' when there is none. */
 export function instructionsPrompt(files: InstructionFile[]): string {
   if (!files.length) return '';
