@@ -101,5 +101,6 @@ export function hydrateIcons(root: ParentNode = document): void {
 
 /** The OpenAgent mark (prompt chevron and cursor on the accent tile), drawn from build/icon.svg's proportions. */
 export function brandMark(size = 40): string {
-  return `<svg class="brand-mark" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="var(--accent)"/><path d="M10.6 13.5L17.6 20l-7 6.5" fill="none" stroke="#fbf5ec" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="21.3" y="24.8" width="8.8" height="3.4" rx="1.7" fill="#fbf5ec"/></svg>`;
+  // The open ring from build/icon.svg at 40 px: an O with a gap at the top right and the agent as the point in it.
+  return `<svg class="brand-mark" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="var(--accent)"/><path d="M20 11 A9 9 0 1 0 29 20" fill="none" stroke="#fbf5ec" stroke-width="3.1" stroke-linecap="round"/><circle cx="27.4" cy="12.9" r="2.4" fill="#fbf5ec"/></svg>`;
 }
